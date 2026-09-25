@@ -514,14 +514,23 @@
     // (Configuración del proyecto → General → Tus apps → SDK de Firebase).
     // No son secretos: identifican tu proyecto, la seguridad real la dan
     // las reglas de Firestore (firestore.rules) y el login de administrador.
-    const firebaseConfig = {
-      apiKey: 'TU_API_KEY',
-      authDomain: 'TU-PROYECTO.firebaseapp.com',
-      projectId: 'TU-PROYECTO',
-      storageBucket: 'TU-PROYECTO.appspot.com',
-      messagingSenderId: 'TU_SENDER_ID',
-      appId: 'TU_APP_ID'
-    };
+    // Import the functions you need from the SDKs you need
+import { initializeApp } from "firebase/app";
+// TODO: Add SDKs for Firebase products that you want to use
+// https://firebase.google.com/docs/web/setup#available-libraries
+
+// Your web app's Firebase configuration
+const firebaseConfig = {
+  apiKey: "AIzaSyDVFBgeO8NZZmRz5ftnfsQA_ATG0CF-mEk",
+  authDomain: "registrodelajornada.firebaseapp.com",
+  projectId: "registrodelajornada",
+  storageBucket: "registrodelajornada.firebasestorage.app",
+  messagingSenderId: "52049721269",
+  appId: "1:52049721269:web:ac5db2202341fe7e76cbfc"
+};
+
+// Initialize Firebase
+const app = initializeApp(firebaseConfig);
 
     const appFirebase = initializeApp(firebaseConfig);
     const db = getFirestore(appFirebase);
