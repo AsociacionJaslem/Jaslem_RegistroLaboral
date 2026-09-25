@@ -1,0 +1,38 @@
+name: Publicar en GitHub Pages
+
+# Se ejecuta solo cada vez que se sube (push) algo a la rama "main".
+# No necesita ningún secreto ni contraseña: usa el permiso que GitHub da
+# automáticamente a sus propios workflows.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {} # permite lanzarlo también a mano desde la pestaña "Actions"
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  publicar:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/configure-pages@v5
+
+      - name: Preparar solo la carpeta "public" para publicarla
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: public
+
+      - name: Publicar
+        id: deployment
+        uses: actions/deploy-pages@v4
