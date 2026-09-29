@@ -334,12 +334,12 @@ correctamente.
 2. Ve a la pestaña **"Administración"**.
 3. Inicia sesión con el email y la contraseña que creaste en el **Paso
    3.6**.
-4. Deberías ver el mensaje de bienvenida y, debajo, la sección
-   **"Gestión de trabajadores"** — da de alta a tu primer trabajador
-   ahí, con su horario y su email (**es obligatorio poner su email
-   correcto**, es a donde le llegará la invitación).
-5. En esa misma lista, junto al trabajador recién creado, pulsa
-   **"Enviar invitación"**.
+4. Deberías ver el mensaje de bienvenida y la pantalla organizada en
+   pestañas. Ve a la pestaña **"➕ Alta nueva"** — da de alta a tu primer
+   trabajador ahí, con su horario y su email (**es obligatorio poner su
+   email correcto**, es a donde le llegará la invitación).
+5. Ve a la pestaña **"👥 Trabajadores"** y, junto al trabajador recién
+   creado, pulsa **"Enviar invitación"**.
 6. Revisa el correo de ese trabajador (o el tuyo propio, si te has dado
    de alta a ti mismo como prueba): te llegará un enlace de JÁSLEM.
 7. Abre ese enlace. La app te pedirá tu email, tu DNI/NIE y que elijas
@@ -356,12 +356,34 @@ Si todo esto funciona, ¡ya está desplegado y en marcha!
 
 ## Uso del día a día
 
-- **Dar de alta a un trabajador**: Administración → "Gestión de
-  trabajadores" → rellena sus datos (con su email real), elige su
-  **modalidad de trabajo** (100% presencial / 100% teletrabajo / mixta) →
-  "Dar de alta". Todavía no puede fichar.
+Al identificarse como administrador, la pantalla se organiza en
+**pestañas** (arriba, con desplazamiento horizontal si no caben todas en
+pantalla), en vez de mostrar todo seguido en un solo bloque:
+
+- **🔔 Pendientes**: registros pendientes de corrección (con el número en
+  rojo si hay alguno) y la búsqueda de los registros de un trabajador
+  concreto para corregir algo puntual.
+- **🕐 Horarios**: lista de trabajadores activos para cambiar la modalidad
+  de trabajo, las franjas horarias o el objetivo de horas semanales de
+  teletrabajo de cualquiera de ellos.
+- **📅 Festivos y cierres**: festivos oficiales y cierres por puente —
+  siempre afectan a todo el equipo a la vez.
+- **🏖️ Vacaciones y bajas**: vacaciones o baja médica de uno, varios o
+  todos los trabajadores a la vez.
+- **👥 Trabajadores**: la plantilla completa — dar de baja, reactivar,
+  editar datos básicos o enviar la invitación de acceso.
+- **➕ Alta nueva**: dar de alta a un trabajador nuevo.
+- **📄 Informes**: generar y descargar informes en PDF o Excel.
+
+Cada pestaña carga solo sus propios datos al abrirla, así que la pantalla
+arranca rápido incluso con muchos trabajadores o mucho historial.
+
+- **Dar de alta a un trabajador**: pestaña **"➕ Alta nueva"** → rellena
+  sus datos (con su email real), elige su **modalidad de trabajo** (100%
+  presencial / 100% teletrabajo / mixta) → "Dar de alta". Todavía no
+  puede fichar.
 - **Editar sus datos más adelante**: el botón **"Editar datos"** de su
-  tarjeta, en "Gestión de trabajadores", permite cambiar apellidos,
+  tarjeta, en la pestaña **"👥 Trabajadores"**, permite cambiar apellidos,
   nombre, categoría, NSS y email en cualquier momento. El **DNI/NIE no se
   puede cambiar ahí** (identifica su ficha en la base de datos): si se
   escribió mal, hay que dar de baja esa ficha y crear una nueva con el
@@ -376,8 +398,8 @@ Si todo esto funciona, ¡ya está desplegado y en marcha!
   minutos, antes y después**. Fuera de ese margen, se pide
   obligatoriamente un motivo.
 - **Modalidad de trabajo**: hay tres modalidades, elegibles y editables en
-  cualquier momento desde Administración → "Gestión de trabajadores" →
-  botón **"Editar horario"** de su tarjeta:
+  cualquier momento desde la pestaña **"🕐 Horarios"** → botón "Editar
+  horario" del trabajador:
   - **100% presencial**: su horario (con sus franjas) se compara siempre
     con la hora real de fichaje, con el margen de 10 minutos de siempre.
   - **100% teletrabajo**: libertad horaria total — ficha libremente
@@ -407,6 +429,18 @@ Si todo esto funciona, ¡ya está desplegado y en marcha!
   objetivo (o se hizo de más), la diferencia se traslada a la semana
   siguiente, pero **solo dentro del mismo mes**: cada mes nuevo siempre
   empieza con el objetivo completo, sin arrastrar nada del mes anterior.
+- **Calendario laboral (festivos, cierres por puente, vacaciones, bajas)**:
+  ahora tiene dos pestañas separadas, con un rango de fechas (un día
+  suelto, o con los atajos "Toda la semana"/"Todo el mes") en cada una:
+  - **📅 Festivos y cierres**: para un festivo oficial o un cierre por
+    puente. Afecta siempre a **todo el equipo** a la vez, no hace falta
+    elegir a nadie.
+  - **🏖️ Vacaciones y bajas**: para vacaciones o baja médica. Aparece una
+    lista con casilla de cada trabajador activo, con una casilla **"Todos
+    los trabajadores activos"** arriba para marcarlos de golpe — así se
+    puede apuntar a un solo trabajador, a varios elegidos a mano (por
+    ejemplo, un equipo que coincide de vacaciones el mismo periodo), o a
+    todos a la vez, sin tener que repetir la operación uno por uno.
 - **Invitarlo**: pulsa **"Enviar invitación"** junto a su nombre, cuando
   tú decidas (nunca se manda sola). Le llegará un correo para que elija
   su código de 6 dígitos.
@@ -501,7 +535,7 @@ que volver a generar el informe.
 
 ### Nunca se elimina a un trabajador
 
-Dar de baja (Administración → Gestión de trabajadores) nunca borra sus
+Dar de baja (Administración → pestaña "👥 Trabajadores") nunca borra sus
 datos ni su historial — solo le retira el acceso (su código de fichaje
 deja de funcionar al instante). Es obligación legal conservar el
 registro horario un mínimo de 4 años, y antes de completar la baja la
