@@ -6,27 +6,55 @@
 // las reglas rechazarán cualquier operación indebida.
 
 import {
-  doc, getDoc, setDoc, updateDoc, addDoc, collection, collectionGroup,
+  doc, getDoc, setDoc, updateDoc, deleteDoc, addDoc, collection, collectionGroup,
   query, where, orderBy, limit, getDocs
 } from 'https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js';
 import {
-  signInWithEmailAndPassword, signOut, onAuthStateChanged
+  signInWithEmailAndPassword, signOut, onAuthStateChanged,
+  sendSignInLinkToEmail, isSignInWithEmailLink, signInWithEmailLink,
+  sendPasswordResetEmail, confirmPasswordReset, updatePassword
 } from 'https://www.gstatic.com/firebasejs/10.13.0/firebase-auth.js';
 
 import {
   soloDigitos, normalizarDia, formatearFecha, formatearHoraCompleta, formatearHoraCorta,
-  obtenerDiaSemana, evaluarPuntualidad, MOTIVOS_CORRECCION, nombreMes, TOLERANCIA_MIN
+  obtenerDiaSemana, evaluarPuntualidad, obtenerTramosValidos, MOTIVOS_CORRECCION, nombreMes, TOLERANCIA_MIN,
+  calcularHashCodigo, codigoValido, calcularHuellaTexto, combinarFechaYHoraCanarias
 } from './logica-comun.js';
+
+export { MOTIVOS_CORRECCION };
+
+// Perfiles de modalidad de trabajo válidos. "presencial" es el valor por
+// defecto para no romper a los trabajadores dados de alta antes de que
+// existiera este campo.
+const PERFILES_TRABAJO_VALIDOS = ['presencial', 'teletrabajo', 'mixta'];
 
 function mapearTrabajador(dni, datos) {
   const apellidos = String((datos && datos.apellidos) || '').trim();
   const nombrePila = String((datos && datos.nombre) || '').trim();
+  const perfilTrabajo = (datos && PERFILES_TRABAJO_VALIDOS.indexOf(datos.perfilTrabajo) !== -1) ? datos.perfilTrabajo : 'presencial';
   return {
     id: dni, dni: dni, apellidos: apellidos, nombrePila: nombrePila,
     nombre: apellidos && nombrePila ? (apellidos + ', ' + nombrePila) : (apellidos || nombrePila),
     categoria: (datos && datos.categoria) || '',
-    activo: !datos || datos.activo !== false
+    activo: !datos || datos.activo !== false,
+    perfilTrabajo: perfilTrabajo
   };
+}
+
+// ¿Debe evaluarse la puntualidad de este fichaje, o el trabajador tiene
+// libertad horaria ese día? El perfil "teletrabajo" (100%) siempre tiene
+// libertad horaria. El perfil "mixta" depende de la modalidad marcada
+// PARA ESE DÍA CONCRETO en su horario ("presencial" = se evalúa como
+// siempre; "teletrabajo" o "mixta" ese día = libertad horaria). El perfil
+// "presencial" (o cualquier trabajador antiguo sin perfil) se evalúa
+// siempre, como hasta ahora.
+function tieneLibertadHorariaHoy(perfilTrabajo, horarioHoy) {
+  if (perfilTrabajo === 'teletrabajo') return true;
+  if (perfilTrabajo === 'mixta') {
+    const modalidadHoy = (horarioHoy && horarioHoy.modalidad) || 'presencial';
+    return modalidadHoy !== 'presencial';
+  }
+  return false;
 }
 
 async function buscarTrabajadorPorDni(db, dni) {
@@ -43,11 +71,24 @@ function partesFechaValidas(fechaStr, mes, anio) {
 }
 
 // =====================================================================
-// FICHAR / MOTIVOS (trabajador — sin login, DNI como código de acceso)
+// FICHAR / MOTIVOS (trabajador — con su código de 6 dígitos, no con el DNI)
 // =====================================================================
-export async function fichar(db, pin, tipo) {
-  const trabajador = await buscarTrabajadorPorDni(db, pin);
-  if (!trabajador) return { ok: false, mensaje: 'DNI/NIE no reconocido.' };
+// Resuelve un código de 6 dígitos a su trabajador, sin guardar el código
+// en ningún sitio: se calcula su huella y se busca esa huella exacta en
+// "codigos_fichaje". Si el trabajador aún no ha aceptado su invitación (no
+// tiene código todavía), esta búsqueda simplemente no encuentra nada.
+async function buscarTrabajadorPorCodigo(db, codigo) {
+  if (!codigoValido(codigo)) return null;
+  const huella = await calcularHashCodigo(codigo);
+  const snap = await getDoc(doc(db, 'codigos_fichaje', huella));
+  if (!snap.exists()) return null;
+  const dni = snap.data().dni;
+  return buscarTrabajadorPorDni(db, dni);
+}
+
+export async function fichar(db, codigo, tipo) {
+  const trabajador = await buscarTrabajadorPorCodigo(db, codigo);
+  if (!trabajador) return { ok: false, mensaje: 'Código no reconocido.' };
   if (!trabajador.activo) return { ok: false, mensaje: 'Este trabajador está dado de baja y no puede fichar.' };
   if (tipo !== 'Entrada' && tipo !== 'Salida') return { ok: false, mensaje: 'Tipo de fichaje no válido.' };
 
@@ -72,19 +113,16 @@ export async function fichar(db, pin, tipo) {
   const claveDia = Object.keys(horarioSemanal).find(function (d) { return normalizarDia(d) === normalizarDia(diaSemana); });
   const horarioHoy = claveDia ? horarioSemanal[claveDia] : null;
 
-  let primeraEntrada = false;
-  if (tipo === 'Entrada') {
-    const primeraSnap = await getDocs(query(fichajesRef, where('fecha', '==', fechaStr), where('tipo', '==', 'Entrada'), limit(1)));
-    primeraEntrada = primeraSnap.empty;
-  }
+  const libertadHoraria = tieneLibertadHorariaHoy(trabajador.perfilTrabajo, horarioHoy);
+  const evaluacion = libertadHoraria ? { fueraDeTiempo: false } : evaluarPuntualidad(horarioHoy, tipo, ahora);
 
-  const evaluacion = evaluarPuntualidad(horarioHoy, tipo, ahora, primeraEntrada);
-
-  await addDoc(fichajesRef, {
+  const fichajeRef = await addDoc(fichajesRef, {
     trabajadorId: dni, nombre: trabajador.nombre, timestampMs: ahora.getTime(),
     fecha: fechaStr, hora: horaStr, tipo: tipo,
+    tipoIncidencia: evaluacion.fueraDeTiempo ? evaluacion.tipo : tipo,
     advertencia: evaluacion.fueraDeTiempo ? ('ADVERTENCIA: ' + evaluacion.detalle) : ''
   });
+  const fichajeId = fichajeRef.id;
 
   let refJustificacion = null;
   if (evaluacion.fueraDeTiempo) {
@@ -115,44 +153,149 @@ export async function fichar(db, pin, tipo) {
     if (!yaHayIncidenciaReciente) {
       await addDoc(collection(db, 'trabajadores', dni, 'incidencias'), {
         trabajadorId: dni, nombre: trabajador.nombre, fecha: fechaStr, hora: horaStr,
-        tipo: evaluacion.tipo, detalle: evaluacion.detalle, minutos: evaluacion.minutos,
+        fichajeId: fichajeId, tipo: evaluacion.tipo, detalle: evaluacion.detalle, minutos: evaluacion.minutos,
         justificada: 'Pendiente', timestampMs: ahora.getTime()
       });
     }
-    refJustificacion = { fecha: fechaStr, hora: horaStr, tipoIncidencia: evaluacion.tipo };
+    refJustificacion = { fichajeId: fichajeId, fecha: fechaStr, hora: horaStr, tipoIncidencia: evaluacion.tipo };
   }
 
   return {
-    ok: true, nombre: trabajador.nombre, tipo: tipo, hora: formatearHoraCorta(ahora),
+    ok: true, nombre: trabajador.nombre, tipo: tipo, hora: formatearHoraCorta(ahora), fichajeId: fichajeId,
     aviso: evaluacion.fueraDeTiempo ? evaluacion.detalle : null, justificacion: refJustificacion
   };
 }
 
-async function registrarCorreccion(db, dni, datos) {
+// =====================================================================
+// CORRECCIONES DE REGISTROS — cadena de rectificaciones, indefinida
+// =====================================================================
+// Cada corrección hace referencia al fichaje original por su ID ESTABLE de
+// Firestore ("fichajeId"), nunca por fecha/hora/tipo (que podían coincidir
+// por casualidad entre dos fichajes distintos). Todas las correcciones de
+// un mismo fichaje forman una cadena cronológica que se conserva siempre,
+// completa: nunca se borra ni se sustituye nada, solo se añaden entradas
+// nuevas. Una entrada puede:
+//   - Ser una SOLICITUD (normalmente del trabajador): solo indica un motivo
+//     (de la lista cerrada MOTIVOS_CORRECCION), sin valorRectificado.
+//   - Ser una RESOLUCIÓN (solo la puede crear un Administrador): indica un
+//     motivo Y fija valorRectificado ({fecha, hora}) — ese valor pasa a ser
+//     el OFICIAL del fichaje (el que cuenta para horas trabajadas e
+//     informes) hasta que, si hace falta, una corrección posterior lo
+//     vuelva a rectificar. Así se puede encadenar una rectificación de una
+//     rectificación tantas veces como haga falta.
+async function registrarCorreccion(db, dni, fichajeId, datos) {
   const ahora = new Date();
-  await addDoc(collection(db, 'trabajadores', dni, 'correcciones'), Object.assign({
+  const ref = await addDoc(collection(db, 'trabajadores', dni, 'correcciones'), Object.assign({
+    fichajeId: fichajeId,
     fechaSolicitud: formatearFecha(ahora), horaSolicitud: formatearHoraCompleta(ahora),
     timestampMs: ahora.getTime()
   }, datos));
+  return ref.id;
 }
 
-export async function indicarMotivoRegistro(db, pin, tipoRegistro, fecha, hora, motivo) {
-  const trabajador = await buscarTrabajadorPorDni(db, pin);
-  if (!trabajador) return { ok: false, mensaje: 'DNI/NIE no reconocido.' };
-  if (MOTIVOS_CORRECCION.indexOf(motivo) === -1) return { ok: false, mensaje: 'Selecciona un motivo de la lista.' };
+// Historial completo (ordenado cronológicamente) de correcciones de UN
+// fichaje concreto.
+async function obtenerCadenaCorrecciones(db, dni, fichajeId) {
+  const snap = await getDocs(query(collection(db, 'trabajadores', dni, 'correcciones'), where('fichajeId', '==', fichajeId)));
+  const cadena = snap.docs.map(function (d) { return Object.assign({ id: d.id }, d.data()); });
+  cadena.sort(function (a, b) { return (a.timestampMs || 0) - (b.timestampMs || 0); });
+  return cadena;
+}
 
-  await registrarCorreccion(db, trabajador.dni, {
+// El valor "oficial" de un fichaje: el valorRectificado de la corrección MÁS
+// RECIENTE que tenga uno fijado (siempre puesto por un Administrador), o si
+// ninguna corrección lo ha fijado todavía, el valor original del fichaje.
+function valorOficialDeFichaje(fichaje, cadenaCorrecciones) {
+  let oficial = { fecha: fichaje.fecha, hora: fichaje.hora, rectificado: false };
+  (cadenaCorrecciones || []).forEach(function (c) {
+    if (c.valorRectificado && c.valorRectificado.fecha && c.valorRectificado.hora) {
+      oficial = { fecha: c.valorRectificado.fecha, hora: c.valorRectificado.hora, rectificado: true };
+    }
+  });
+  return oficial;
+}
+
+// Estado a mostrar de un registro concreto, a partir de su cadena de
+// correcciones — lo usan tanto "Mis registros" como "Administración".
+//   'correcto'  -> nada pendiente, nunca hizo falta corregirlo
+//   'pendiente' -> fuera de horario y todavía nadie ha hecho nada
+//   'solicitada'-> el trabajador ha pedido una corrección, sin resolver aún
+//   'corregido' -> ya hay un valor oficial rectificado por un administrador
+function calcularEstadoRegistro(fichaje, cadenaCorrecciones) {
+  const oficial = valorOficialDeFichaje(fichaje, cadenaCorrecciones);
+  const ultima = cadenaCorrecciones[cadenaCorrecciones.length - 1];
+  let estado = 'correcto';
+  if (oficial.rectificado) estado = 'corregido';
+  else if (ultima && ultima.rolSolicitante === 'Trabajador' && !ultima.valorRectificado) estado = 'solicitada';
+  else if (fichaje.advertencia) estado = 'pendiente';
+  return { estado: estado, oficial: oficial };
+}
+
+// SOLICITUD del propio trabajador: solo indica el motivo (de la lista
+// cerrada) sobre CUALQUIER fichaje suyo, no solo los marcados en rojo. La
+// hora corregida la decide siempre el administrador, nunca el trabajador.
+export async function solicitarCorreccionTrabajador(db, codigo, fichajeId, motivo) {
+  const trabajador = await buscarTrabajadorPorCodigo(db, codigo);
+  if (!trabajador) return { ok: false, mensaje: 'Código no reconocido.' };
+  if (MOTIVOS_CORRECCION.indexOf(motivo) === -1) return { ok: false, mensaje: 'Selecciona un motivo de la lista.' };
+  if (!fichajeId) return { ok: false, mensaje: 'No se pudo identificar el registro a corregir.' };
+
+  const fichajeSnap = await getDoc(doc(db, 'trabajadores', trabajador.dni, 'fichajes', fichajeId));
+  if (!fichajeSnap.exists()) return { ok: false, mensaje: 'No se encontró ese registro.' };
+  const fichaje = fichajeSnap.data();
+  const cadena = await obtenerCadenaCorrecciones(db, trabajador.dni, fichajeId);
+  const oficial = valorOficialDeFichaje(fichaje, cadena);
+
+  await registrarCorreccion(db, trabajador.dni, fichajeId, {
     solicitanteId: trabajador.dni, solicitanteNombre: trabajador.nombre, rolSolicitante: 'Trabajador',
     afectadoId: trabajador.dni, afectadoNombre: trabajador.nombre,
-    tipoRegistro: tipoRegistro, fechaOriginal: fecha, horaOriginal: hora,
-    motivo: String(motivo).trim(), valorPropuesto: ''
+    tipoRegistro: fichaje.tipoIncidencia || fichaje.tipo, fechaOriginal: fichaje.fecha, horaOriginal: fichaje.hora,
+    valorAnterior: { fecha: oficial.fecha, hora: oficial.hora },
+    motivo: String(motivo).trim(), valorRectificado: null
   });
   return { ok: true };
 }
 
+// Nombre anterior, conservado como alias por compatibilidad (mismo
+// comportamiento que solicitarCorreccionTrabajador).
+export const indicarMotivoRegistro = solicitarCorreccionTrabajador;
+
 // =====================================================================
 // CONSULTA DE REGISTROS DE UN TRABAJADOR (Mis registros / Administración)
 // =====================================================================
+// Junta los fichajes en bruto de Firestore con su cadena de correcciones
+// (agrupadas por fichajeId) para producir la lista de "registros" que
+// consumen tanto "Mis registros" como "Administración": cada uno con su id
+// estable, su estado actual y su valor oficial (rectificado o no).
+function construirRegistrosConCadenas(fichajesDocs, correccionesDocs) {
+  const correccionesTodas = correccionesDocs.map(function (d) { return Object.assign({ id: d.id }, d.data()); });
+  const cadenasPorFichaje = {};
+  correccionesTodas.forEach(function (c) {
+    if (!c.fichajeId) return;
+    (cadenasPorFichaje[c.fichajeId] = cadenasPorFichaje[c.fichajeId] || []).push(c);
+  });
+  Object.keys(cadenasPorFichaje).forEach(function (k) {
+    cadenasPorFichaje[k].sort(function (a, b) { return (a.timestampMs || 0) - (b.timestampMs || 0); });
+  });
+
+  const registros = fichajesDocs.map(function (d) {
+    const f = Object.assign({ id: d.id }, d.data());
+    const cadena = cadenasPorFichaje[f.id] || [];
+    const info = calcularEstadoRegistro(f, cadena);
+    let timestampMs = f.timestampMs;
+    if (info.oficial.rectificado) {
+      try { timestampMs = combinarFechaYHoraCanarias(info.oficial.fecha, info.oficial.hora).getTime(); } catch (e) { /* se deja el original si algo falla */ }
+    }
+    return {
+      id: f.id, fichajeId: f.id, fecha: f.fecha, hora: f.hora, tipo: f.tipo,
+      advertencia: f.advertencia || '', tipoIncidencia: f.tipoIncidencia || f.tipo,
+      estado: info.estado, oficial: info.oficial, timestampMs: timestampMs, cadena: cadena
+    };
+  });
+
+  return { registros: registros, correccionesTodas: correccionesTodas };
+}
+
 async function obtenerRegistrosPorDni(db, dni, mes, anio) {
   const [fichajesSnap, incidenciasSnap, correccionesSnap] = await Promise.all([
     getDocs(collection(db, 'trabajadores', dni, 'fichajes')),
@@ -160,21 +303,10 @@ async function obtenerRegistrosPorDni(db, dni, mes, anio) {
     getDocs(collection(db, 'trabajadores', dni, 'correcciones'))
   ]);
 
-  const mapaTipoIncidencia = {};
-  incidenciasSnap.docs.forEach(function (d) {
-    const inc = d.data();
-    mapaTipoIncidencia[inc.fecha + '|' + inc.hora] = inc.tipo;
-  });
+  const construido = construirRegistrosConCadenas(fichajesSnap.docs, correccionesSnap.docs);
 
-  const registros = fichajesSnap.docs
-    .map(function (d) { return d.data(); })
+  const registros = construido.registros
     .filter(function (f) { return partesFechaValidas(f.fecha, mes, anio); })
-    .map(function (f) {
-      return {
-        fecha: f.fecha, hora: f.hora, tipo: f.tipo, advertencia: f.advertencia || '',
-        tipoIncidencia: mapaTipoIncidencia[f.fecha + '|' + f.hora] || f.tipo
-      };
-    })
     .sort(function (a, b) { return (a.fecha + a.hora).localeCompare(b.fecha + b.hora); });
 
   const incidencias = incidenciasSnap.docs
@@ -182,25 +314,163 @@ async function obtenerRegistrosPorDni(db, dni, mes, anio) {
     .filter(function (i) { return partesFechaValidas(i.fecha, mes, anio); })
     .map(function (i) { return { fecha: i.fecha, tipo: i.tipo, detalle: i.detalle, justificada: i.justificada }; });
 
-  const correcciones = correccionesSnap.docs
-    .map(function (d) { return d.data(); })
+  const correcciones = construido.correccionesTodas
     .filter(function (c) { return partesFechaValidas(c.fechaOriginal, mes, anio); })
     .map(function (c) {
       return {
-        fechaSolicitud: c.fechaSolicitud, solicitante: c.solicitanteNombre, rolSolicitante: c.rolSolicitante,
+        id: c.id, fichajeId: c.fichajeId, fechaSolicitud: c.fechaSolicitud, horaSolicitud: c.horaSolicitud,
+        solicitante: c.solicitanteNombre, rolSolicitante: c.rolSolicitante,
         tipoRegistro: c.tipoRegistro, fechaOriginal: c.fechaOriginal, horaOriginal: c.horaOriginal,
-        motivo: c.motivo, valorPropuesto: c.valorPropuesto
+        motivo: c.motivo, valorAnterior: c.valorAnterior || null, valorRectificado: c.valorRectificado || null
       };
     });
 
   return { registros: registros, incidencias: incidencias, correcciones: correcciones };
 }
 
-export async function obtenerMisRegistros(db, pin, mes, anio) {
-  const trabajador = await buscarTrabajadorPorDni(db, pin);
-  if (!trabajador) return { ok: false, mensaje: 'DNI/NIE no reconocido.' };
+// "Mis registros" ahora es privado: hace falta haber iniciado sesión (con
+// el email y el código de 6 dígitos) para ver el propio historial — ya no
+// basta con escribir el DNI de otra persona para ver sus datos.
+export async function obtenerMisRegistros(db, auth, mes, anio) {
+  if (!auth.currentUser) return { ok: false, mensaje: 'Tu sesión ha caducado. Vuelve a iniciar sesión.' };
+  const enlaceSnap = await getDoc(doc(db, 'uid_a_dni', auth.currentUser.uid));
+  if (!enlaceSnap.exists()) return { ok: false, mensaje: 'Esta cuenta todavía no está vinculada a ningún trabajador.' };
+  const trabajador = await buscarTrabajadorPorDni(db, enlaceSnap.data().dni);
+  if (!trabajador) return { ok: false, mensaje: 'No se encontró tu ficha de trabajador.' };
   const datos = await obtenerRegistrosPorDni(db, trabajador.dni, mes, anio);
   return Object.assign({ ok: true, nombre: trabajador.nombre }, datos);
+}
+
+// =====================================================================
+// CUENTA DEL TRABAJADOR: invitación, primer código, recuperar código
+// =====================================================================
+// Todo esto usa Firebase Authentication de verdad (email + el propio
+// código de 6 dígitos como contraseña) — así el código queda cifrado por
+// Firebase, nadie (ni el administrador) puede leerlo, y el trabajador
+// puede recuperarlo él solo en cualquier momento.
+
+// Vincula la cuenta ya autenticada (uid) con su ficha de trabajador (dni),
+// y sincroniza su código de fichaje: borra la huella antigua (si la había)
+// y crea la nueva. Se usa tanto al aceptar la invitación por primera vez
+// como al recuperar un código olvidado.
+async function sincronizarCuentaYCodigo(auth, db, dni, codigoNuevo) {
+  if (!codigoValido(codigoNuevo)) return { ok: false, mensaje: 'El código debe tener exactamente 6 dígitos.' };
+  const uid = auth.currentUser.uid;
+
+  // Vincular uid <-> dni (solo la primera vez; si ya estaba vinculado a
+  // este mismo uid, estos dos intentos fallan por permisos y se ignoran
+  // a propósito — no es un error real, solo significa "ya estaba hecho").
+  try { await updateDoc(doc(db, 'trabajadores_privado', dni), { uid: uid }); } catch (e) { /* ya estaba vinculado */ }
+  try { await setDoc(doc(db, 'uid_a_dni', uid), { dni: dni }); } catch (e) { /* ya existía */ }
+
+  // Averiguar si ya tenía un código anterior, para borrar su huella antigua
+  // DESPUÉS de crear la nueva — así nunca hay una ventana en la que el
+  // trabajador se quede sin ningún código válido si algo falla a mitad.
+  let huellaAntigua = null;
+  try {
+    const privSnapAntes = await getDoc(doc(db, 'trabajadores_privado', dni));
+    huellaAntigua = privSnapAntes.exists() ? (privSnapAntes.data().hashCodigoActual || null) : null;
+  } catch (e) { /* si no se puede leer, simplemente no se borra nada antiguo */ }
+
+  await updatePassword(auth.currentUser, codigoNuevo);
+
+  const huellaNueva = await calcularHashCodigo(codigoNuevo);
+  await setDoc(doc(db, 'codigos_fichaje', huellaNueva), { dni: dni });
+  await updateDoc(doc(db, 'trabajadores_privado', dni), { hashCodigoActual: huellaNueva });
+
+  // Solo ahora, con el código nuevo ya funcionando, se borra el antiguo —
+  // así el código viejo deja de servir para fichar (no puede quedar activo
+  // a la vez que el nuevo).
+  if (huellaAntigua && huellaAntigua !== huellaNueva) {
+    try { await deleteDoc(doc(db, 'codigos_fichaje', huellaAntigua)); } catch (e) { /* no pasa nada si ya no existía */ }
+  }
+
+  return { ok: true };
+}
+
+function enlaceInvitacion() {
+  const url = new URL(window.location.href);
+  url.search = ''; url.hash = '';
+  return { url: url.toString(), handleCodeInApp: true };
+}
+
+// La manda el ADMINISTRADOR, cuando él quiere — nunca en automático.
+export async function enviarInvitacionTrabajador(auth, db, dni) {
+  if (!auth.currentUser) return { ok: false, mensaje: 'Tu sesión ha caducado. Vuelve a identificarte.' };
+  const privSnap = await getDoc(doc(db, 'trabajadores_privado', dni));
+  if (!privSnap.exists() || !privSnap.data().email) return { ok: false, mensaje: 'Este trabajador no tiene un email guardado.' };
+  const email = privSnap.data().email;
+  await sendSignInLinkToEmail(auth, email, enlaceInvitacion());
+  window.localStorage.setItem('jaslem_email_invitacion', email);
+  return { ok: true, email: email };
+}
+
+// ¿La página se ha abierto desde un enlace de invitación o de recuperación?
+export function esEnlaceDeAccesoTrabajador(auth) {
+  return isSignInWithEmailLink(auth, window.location.href);
+}
+
+// Paso 1 de la invitación: el trabajador confirma su email (para completar
+// el enlace) y su DNI/NIE (para saber a qué ficha pertenece).
+export async function aceptarInvitacion(auth, db, email, dni, codigoNuevo) {
+  let credencial;
+  try {
+    credencial = await signInWithEmailLink(auth, email, window.location.href);
+  } catch (e) {
+    return { ok: false, mensaje: 'El enlace no es válido o ha caducado. Pide al administrador que te mande uno nuevo.' };
+  }
+  const dniDigits = soloDigitos(dni);
+  const resultado = await sincronizarCuentaYCodigo(auth, db, dniDigits, codigoNuevo);
+  if (!resultado.ok) { await signOut(auth); return resultado; }
+  await signOut(auth); // el kiosk no debe quedarse con nadie con la sesión abierta
+  return { ok: true };
+}
+
+// "He olvidado mi código" — lo pide el propio trabajador, sin que el
+// administrador tenga que hacer nada.
+export async function solicitarRecuperarCodigo(auth, email) {
+  try {
+    await sendPasswordResetEmail(auth, email, enlaceInvitacion());
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, mensaje: 'No se pudo enviar el correo. Comprueba el email.' };
+  }
+}
+
+// Paso 2 de "he olvidado mi código": llega desde el enlace del correo, con
+// un código de un solo uso (oobCode) en la dirección web.
+export async function confirmarNuevoCodigo(auth, db, oobCode, email, dni, codigoNuevo) {
+  if (!codigoValido(codigoNuevo)) return { ok: false, mensaje: 'El código debe tener exactamente 6 dígitos.' };
+  try {
+    await confirmPasswordReset(auth, oobCode, codigoNuevo);
+  } catch (e) {
+    return { ok: false, mensaje: 'El enlace no es válido o ha caducado. Pide uno nuevo desde "He olvidado mi código".' };
+  }
+  try {
+    await signInWithEmailAndPassword(auth, email, codigoNuevo);
+  } catch (e) {
+    return { ok: false, mensaje: 'Tu código se ha cambiado, pero no se pudo terminar de guardar. Inténtalo otra vez.' };
+  }
+  const dniDigits = soloDigitos(dni);
+  const resultado = await sincronizarCuentaYCodigo(auth, db, dniDigits, codigoNuevo);
+  await signOut(auth);
+  return resultado;
+}
+
+// Inicio de sesión del propio TRABAJADOR en "Mis registros" — con su email
+// y el código de 6 dígitos que él eligió (nunca con su DNI).
+export async function loginTrabajador(auth, email, codigo) {
+  if (!codigoValido(codigo)) return { ok: false, mensaje: 'El código debe tener 6 dígitos.' };
+  try {
+    await signInWithEmailAndPassword(auth, String(email || '').trim(), codigo);
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, mensaje: 'Email o código incorrectos.' };
+  }
+}
+
+export function logoutTrabajador(auth) {
+  return signOut(auth);
 }
 
 // =====================================================================
@@ -232,86 +502,158 @@ export function observarSesionAdmin(auth, callback) {
 // =====================================================================
 // ADMINISTRACIÓN: registros pendientes, agrupados por trabajador
 // =====================================================================
+// Registros que necesitan atención del administrador: fichajes con una
+// incidencia automática sin resolver, Y/O fichajes sobre los que el
+// trabajador ha pedido una corrección (esté o no marcado en rojo) que
+// todavía no tiene una rectificación oficial del administrador.
 export async function obtenerRegistrosPendientes(db) {
   const [incidenciasSnap, correccionesSnap] = await Promise.all([
     getDocs(collectionGroup(db, 'incidencias')),
     getDocs(collectionGroup(db, 'correcciones'))
   ]);
 
-  const motivosPorClave = {};
+  // Agrupa todas las correcciones por (dni, fichajeId) para poder calcular
+  // el estado actual de la cadena de cada fichaje.
+  const cadenasPorClave = {};
   correccionesSnap.docs.forEach(function (d) {
     const c = d.data();
-    if (c.rolSolicitante !== 'Trabajador') return;
-    motivosPorClave[c.afectadoId + '|' + c.fechaOriginal + '|' + c.horaOriginal + '|' + c.tipoRegistro] = c.motivo;
+    if (!c.fichajeId || !c.afectadoId) return;
+    const clave = c.afectadoId + '|' + c.fichajeId;
+    (cadenasPorClave[clave] = cadenasPorClave[clave] || []).push(c);
+  });
+  Object.keys(cadenasPorClave).forEach(function (clave) {
+    cadenasPorClave[clave].sort(function (a, b) { return (a.timestampMs || 0) - (b.timestampMs || 0); });
   });
 
   const dniCache = {};
-  const horarioCache = {};
   async function obtenerDniInfo(dni) {
     if (dniCache[dni]) return dniCache[dni];
-    const [tSnap, hSnap] = await Promise.all([
-      getDoc(doc(db, 'trabajadores', dni)),
-      getDoc(doc(db, 'horarios', dni))
-    ]);
+    const tSnap = await getDoc(doc(db, 'trabajadores', dni));
     dniCache[dni] = tSnap.exists() ? mapearTrabajador(dni, tSnap.data()) : null;
-    horarioCache[dni] = hSnap.exists() ? hSnap.data() : {};
     return dniCache[dni];
   }
 
   const pendientes = [];
+  const clavesYaAnadidas = {};
+
+  // 1) Fichajes con una incidencia automática todavía sin resolver.
   for (const d of incidenciasSnap.docs) {
     const inc = d.data();
     if (inc.justificada === 'Sí' || inc.justificada === 'Resuelto') continue;
     const dni = inc.trabajadorId;
     await obtenerDniInfo(dni);
 
-    const partesFecha = String(inc.fecha).split('/');
-    const diaSemana = partesFecha.length === 3
-      ? new Date(Number(partesFecha[2]), Number(partesFecha[1]) - 1, Number(partesFecha[0])).toLocaleDateString('es-ES', { weekday: 'long' })
-      : '';
-    const horarioTrabajador = horarioCache[dni] || {};
-    const diaKey = Object.keys(horarioTrabajador).find(function (dd) { return dd.toLowerCase().startsWith(diaSemana.toLowerCase().slice(0, 3)); });
-    const horarioEseDia = diaKey ? (horarioTrabajador[diaKey].entrada + ' - ' + horarioTrabajador[diaKey].salida) : '';
+    const fichajeId = inc.fichajeId || null;
+    const clave = fichajeId ? (dni + '|' + fichajeId) : null;
+    const cadena = clave ? (cadenasPorClave[clave] || []) : [];
+    const ultima = cadena[cadena.length - 1];
+    if (ultima && ultima.valorRectificado) continue; // ya tiene un valor oficial rectificado
 
-    const clave = dni + '|' + inc.fecha + '|' + inc.hora + '|' + inc.tipo;
     pendientes.push({
-      trabajadorId: dni, trabajadorNombre: inc.nombre, trabajadorDni: dni, horarioEseDia: horarioEseDia,
+      trabajadorId: dni, trabajadorNombre: inc.nombre, trabajadorDni: dni, fichajeId: fichajeId,
       fecha: inc.fecha, hora: inc.hora, tipo: inc.tipo, detalle: inc.detalle,
-      estado: inc.justificada || 'Pendiente', motivoTrabajador: motivosPorClave[clave] || '',
-      _refPath: d.ref.path
+      origen: 'Automática', motivoTrabajador: (ultima && !ultima.valorRectificado) ? ultima.motivo : ''
     });
+    if (clave) clavesYaAnadidas[clave] = true;
   }
 
+  // 2) Solicitudes de corrección del trabajador sobre CUALQUIER registro
+  // (esté marcado en rojo o no) que todavía no tienen respuesta.
+  Object.keys(cadenasPorClave).forEach(function (clave) {
+    if (clavesYaAnadidas[clave]) return;
+    const cadena = cadenasPorClave[clave];
+    const ultima = cadena[cadena.length - 1];
+    if (!ultima || ultima.valorRectificado) return; // ya resuelta
+    if (ultima.rolSolicitante !== 'Trabajador') return; // una nota propia del admin no es "pendiente"
+    pendientes.push({
+      trabajadorId: ultima.afectadoId, trabajadorNombre: ultima.afectadoNombre, trabajadorDni: ultima.afectadoId,
+      fichajeId: ultima.fichajeId, fecha: ultima.fechaOriginal, hora: ultima.horaOriginal, tipo: ultima.tipoRegistro,
+      detalle: 'Solicitud de corrección del trabajador', origen: 'Solicitud del trabajador', motivoTrabajador: ultima.motivo
+    });
+  });
+
   pendientes.sort(function (a, b) {
-    const pa = a.fecha.split('/').map(Number), pb = b.fecha.split('/').map(Number);
+    const pa = String(a.fecha).split('/').map(Number), pb = String(b.fecha).split('/').map(Number);
     return new Date(pb[2] || 0, (pb[1] || 1) - 1, pb[0] || 1) - new Date(pa[2] || 0, (pa[1] || 1) - 1, pa[0] || 1);
   });
 
   return { ok: true, pendientes: pendientes };
 }
 
-export async function resolverRegistroAdmin(db, auth, trabajadorId, tipoRegistro, fecha, hora, motivo, valorPropuesto) {
+// RESOLUCIÓN de un administrador sobre un fichaje concreto (identificado
+// por su fichajeId estable): fija el motivo Y el valor rectificado
+// (fecha+hora), que pasa a ser el oficial de ese fichaje a partir de ahora.
+// Sirve tanto para responder a una solicitud del trabajador (confirmando su
+// motivo o poniendo el que el administrador considere correcto) como para
+// que el administrador corrija un registro por iniciativa propia, sin que
+// nadie se lo haya pedido — es la misma operación en ambos casos, y se
+// puede repetir tantas veces como haga falta sobre el mismo fichaje
+// (rectificación de una rectificación, indefinidamente).
+export async function resolverCorreccionAdmin(db, auth, dniTrabajador, fichajeId, motivo, fechaRectificada, horaRectificada) {
+  if (!auth.currentUser) return { ok: false, mensaje: 'Tu sesión ha caducado. Vuelve a identificarte.' };
+  if (MOTIVOS_CORRECCION.indexOf(motivo) === -1) return { ok: false, mensaje: 'Selecciona un motivo de la lista.' };
+  if (!fechaRectificada || !horaRectificada) return { ok: false, mensaje: 'Indica la fecha y la hora correctas.' };
+  if (!fichajeId) return { ok: false, mensaje: 'No se pudo identificar el registro a corregir.' };
+
+  const trabajador = await buscarTrabajadorPorDni(db, dniTrabajador);
+  if (!trabajador) return { ok: false, mensaje: 'No se encontró ese trabajador.' };
+
+  const fichajeRef = doc(db, 'trabajadores', trabajador.dni, 'fichajes', fichajeId);
+  const fichajeSnap = await getDoc(fichajeRef);
+  if (!fichajeSnap.exists()) return { ok: false, mensaje: 'No se encontró ese registro.' };
+  const fichaje = fichajeSnap.data();
+
+  const cadena = await obtenerCadenaCorrecciones(db, trabajador.dni, fichajeId);
+  const oficialAntes = valorOficialDeFichaje(fichaje, cadena);
+
+  await registrarCorreccion(db, trabajador.dni, fichajeId, {
+    solicitanteId: 'ADMIN', solicitanteNombre: auth.currentUser.email, rolSolicitante: 'Administrador',
+    afectadoId: trabajador.dni, afectadoNombre: trabajador.nombre,
+    tipoRegistro: fichaje.tipoIncidencia || fichaje.tipo, fechaOriginal: fichaje.fecha, horaOriginal: fichaje.hora,
+    valorAnterior: { fecha: oficialAntes.fecha, hora: oficialAntes.hora },
+    motivo: String(motivo).trim(),
+    valorRectificado: { fecha: String(fechaRectificada).trim(), hora: String(horaRectificada).trim() }
+  });
+
+  // Si había una incidencia automática pendiente sobre este mismo fichaje,
+  // se marca como resuelta (no crítico si falla: la corrección ya quedó
+  // registrada de todas formas).
+  try {
+    const incSnap = await getDocs(query(collection(db, 'trabajadores', trabajador.dni, 'incidencias'), where('fichajeId', '==', fichajeId)));
+    for (const d of incSnap.docs) {
+      if (d.data().justificada === 'Pendiente') {
+        await updateDoc(d.ref, { justificada: 'Resuelto', resueltoPor: auth.currentUser.uid, resueltoEl: formatearFecha(new Date()) });
+      }
+    }
+  } catch (e) { /* no crítico */ }
+
+  return { ok: true };
+}
+
+// Las AUSENCIAS son un caso especial dentro de "pendientes": no hay ningún
+// fichaje que rectificar (el trabajador no fichó ese día), así que no
+// tienen fichajeId. Aquí simplemente se registra el motivo alegado y se
+// marca la ausencia como justificada.
+export async function resolverAusenciaAdmin(db, auth, trabajadorId, fecha, motivo) {
   if (!auth.currentUser) return { ok: false, mensaje: 'Tu sesión ha caducado. Vuelve a identificarte.' };
   if (MOTIVOS_CORRECCION.indexOf(motivo) === -1) return { ok: false, mensaje: 'Selecciona un motivo de la lista.' };
 
   const trabajador = await buscarTrabajadorPorDni(db, trabajadorId);
   if (!trabajador) return { ok: false, mensaje: 'No se encontró ese trabajador.' };
 
-  await registrarCorreccion(db, trabajador.dni, {
-    solicitanteId: 'ADMIN', solicitanteNombre: auth.currentUser.email, rolSolicitante: 'Administrador',
-    afectadoId: trabajador.dni, afectadoNombre: trabajador.nombre,
-    tipoRegistro: tipoRegistro, fechaOriginal: fecha, horaOriginal: hora,
-    motivo: String(motivo).trim(), valorPropuesto: valorPropuesto ? String(valorPropuesto).trim() : ''
-  });
-
-  // Marcar la incidencia exacta como resuelta.
   const incSnap = await getDocs(query(
     collection(db, 'trabajadores', trabajador.dni, 'incidencias'),
-    where('fecha', '==', fecha), where('hora', '==', hora), where('tipo', '==', tipoRegistro), limit(1)
+    where('fecha', '==', fecha), where('tipo', '==', 'Ausencia'), limit(1)
   ));
-  if (!incSnap.empty) {
-    await updateDoc(incSnap.docs[0].ref, { justificada: 'Resuelto', resueltoPor: auth.currentUser.uid, resueltoEl: formatearFecha(new Date()) });
-  }
+  if (incSnap.empty) return { ok: false, mensaje: 'No se encontró esa ausencia ese día.' };
+
+  await registrarCorreccion(db, trabajador.dni, null, {
+    solicitanteId: 'ADMIN', solicitanteNombre: auth.currentUser.email, rolSolicitante: 'Administrador',
+    afectadoId: trabajador.dni, afectadoNombre: trabajador.nombre,
+    tipoRegistro: 'Ausencia', fechaOriginal: fecha, horaOriginal: '—',
+    valorAnterior: null, motivo: String(motivo).trim(), valorRectificado: null
+  });
+  await updateDoc(incSnap.docs[0].ref, { justificada: 'Sí', resueltoPor: auth.currentUser.uid, resueltoEl: formatearFecha(new Date()) });
 
   return { ok: true };
 }
@@ -321,21 +663,6 @@ export async function obtenerRegistrosAdmin(db, dniObjetivo, mes, anio) {
   if (!objetivo) return { ok: false, mensaje: 'No se encontró ningún trabajador con ese DNI/NIE.' };
   const datos = await obtenerRegistrosPorDni(db, objetivo.dni, mes, anio);
   return Object.assign({ ok: true, nombre: objetivo.nombre }, datos);
-}
-
-export async function solicitarCorreccionAdmin(db, auth, dniAfectado, tipoRegistro, fechaOriginal, horaOriginal, motivo, valorPropuesto) {
-  if (!auth.currentUser) return { ok: false, mensaje: 'Tu sesión ha caducado. Vuelve a identificarte.' };
-  const afectado = await buscarTrabajadorPorDni(db, dniAfectado);
-  if (!afectado) return { ok: false, mensaje: 'No se encontró ningún trabajador con ese DNI/NIE.' };
-  if (MOTIVOS_CORRECCION.indexOf(motivo) === -1) return { ok: false, mensaje: 'Selecciona un motivo de la lista.' };
-
-  await registrarCorreccion(db, afectado.dni, {
-    solicitanteId: 'ADMIN', solicitanteNombre: auth.currentUser.email, rolSolicitante: 'Administrador',
-    afectadoId: afectado.dni, afectadoNombre: afectado.nombre,
-    tipoRegistro: tipoRegistro, fechaOriginal: fechaOriginal, horaOriginal: horaOriginal,
-    motivo: String(motivo).trim(), valorPropuesto: valorPropuesto ? String(valorPropuesto).trim() : ''
-  });
-  return { ok: true };
 }
 
 // =====================================================================
@@ -360,20 +687,111 @@ export async function anadirTrabajador(db, datos) {
   const existente = await getDoc(ref);
   if (existente.exists()) return { ok: false, mensaje: 'Ya existe un trabajador con ese DNI/NIE (activo o de baja).' };
 
-  await setDoc(ref, { apellidos: apellidos, nombre: nombre, categoria: String(datos.categoria || '').trim(), activo: true });
+  const perfilTrabajo = PERFILES_TRABAJO_VALIDOS.indexOf(datos.perfilTrabajo) !== -1 ? datos.perfilTrabajo : 'presencial';
+
+  await setDoc(ref, { apellidos: apellidos, nombre: nombre, categoria: String(datos.categoria || '').trim(), activo: true, perfilTrabajo: perfilTrabajo });
   await setDoc(doc(db, 'trabajadores_privado', dni), { nss: String(datos.nss || '').trim(), email: String(datos.email || '').trim() });
 
-  let diasGuardados = 0;
-  if (datos.horarioSemanal && typeof datos.horarioSemanal === 'object') {
-    const horarioLimpio = {};
-    Object.keys(datos.horarioSemanal).forEach(function (dia) {
-      const h = datos.horarioSemanal[dia];
-      if (h && h.entrada && h.salida) { horarioLimpio[dia] = { entrada: h.entrada, salida: h.salida }; diasGuardados++; }
-    });
-    if (diasGuardados > 0) await setDoc(doc(db, 'horarios', dni), horarioLimpio);
-  }
+  const diasGuardados = await guardarHorarioSemanal(db, dni, perfilTrabajo, datos.horarioSemanal);
 
   return { ok: true, id: dni, nombre: apellidos + ', ' + nombre, diasHorario: diasGuardados };
+}
+
+// El administrador puede editar los datos básicos de un trabajador YA dado
+// de alta (apellidos, nombre, categoría, NSS, email). El DNI/NIE NUNCA se
+// puede cambiar desde aquí, porque es el identificador del documento en
+// Firestore — si se escribió mal al darlo de alta, la única forma de
+// corregirlo es dar de baja esa ficha y crear una nueva con el DNI correcto.
+export async function actualizarDatosTrabajador(db, dni, datos) {
+  const dniDigits = soloDigitos(dni);
+  if (!dniDigits) return { ok: false, mensaje: 'DNI/NIE no válido.' };
+
+  const ref = doc(db, 'trabajadores', dniDigits);
+  const snap = await getDoc(ref);
+  if (!snap.exists()) return { ok: false, mensaje: 'No se encontró ningún trabajador con ese DNI/NIE.' };
+
+  const apellidos = String(datos.apellidos || '').trim();
+  const nombre = String(datos.nombre || '').trim();
+  if (!apellidos || !nombre) return { ok: false, mensaje: 'Indica los apellidos y el nombre.' };
+
+  await updateDoc(ref, { apellidos: apellidos, nombre: nombre, categoria: String(datos.categoria || '').trim() });
+  await setDoc(doc(db, 'trabajadores_privado', dniDigits), {
+    nss: String(datos.nss || '').trim(), email: String(datos.email || '').trim()
+  }, { merge: true });
+
+  return { ok: true, nombre: apellidos + ', ' + nombre };
+}
+
+// Guarda (sustituyendo por completo) el horario semanal de un trabajador,
+// con soporte de horario partido: cada día puede tener varias franjas
+// horarias ("tramos"), no solo una entrada/salida. Si su modalidad es
+// "mixta", cada día guarda también qué modalidad le corresponde ESE día
+// (presencial/teletrabajo/mixta); si no, ese dato no hace falta guardarlo
+// (ya lo dice el perfil general del trabajador). Admite, por
+// compatibilidad, que un día llegue todavía en el formato antiguo (una
+// única entrada/salida, con pausa opcional).
+async function guardarHorarioSemanal(db, dni, perfilTrabajo, horarioSemanal) {
+  const horarioLimpio = {};
+  let diasGuardados = 0;
+  if (horarioSemanal && typeof horarioSemanal === 'object') {
+    Object.keys(horarioSemanal).forEach(function (dia) {
+      const h = horarioSemanal[dia];
+      if (!h) return;
+
+      let tramos = [];
+      if (Array.isArray(h.tramos)) {
+        tramos = h.tramos.filter(function (t) { return t && t.entrada && t.salida; });
+      } else if (h.entrada && h.salida) {
+        tramos = (h.pausaInicio && h.pausaFin)
+          ? [{ entrada: h.entrada, salida: h.pausaInicio }, { entrada: h.pausaFin, salida: h.salida }]
+          : [{ entrada: h.entrada, salida: h.salida }];
+      }
+      if (tramos.length === 0) return;
+
+      const fila = { tramos: tramos };
+      if (perfilTrabajo === 'mixta') {
+        fila.modalidad = PERFILES_TRABAJO_VALIDOS.indexOf(h.modalidad) !== -1 ? h.modalidad : 'presencial';
+      }
+      horarioLimpio[dia] = fila;
+      diasGuardados++;
+    });
+  }
+  // Siempre se reemplaza el documento entero (aunque quede vacío), para
+  // que un día que se borre en el formulario de edición desaparezca
+  // también de Firestore y no quede fichando "libre" de casualidad.
+  await setDoc(doc(db, 'horarios', dni), horarioLimpio);
+  return diasGuardados;
+}
+
+// Perfil (modalidad de trabajo) y horario actuales de un trabajador — para
+// precargar el formulario de edición.
+export async function obtenerPerfilYHorario(db, dni) {
+  const dniDigits = soloDigitos(dni);
+  const [tSnap, hSnap] = await Promise.all([
+    getDoc(doc(db, 'trabajadores', dniDigits)),
+    getDoc(doc(db, 'horarios', dniDigits))
+  ]);
+  if (!tSnap.exists()) return { ok: false, mensaje: 'No se encontró ningún trabajador con ese DNI/NIE.' };
+  const t = mapearTrabajador(dniDigits, tSnap.data());
+  return { ok: true, perfilTrabajo: t.perfilTrabajo, nombre: t.nombre, horarioSemanal: hSnap.exists() ? hSnap.data() : {} };
+}
+
+// El administrador puede cambiar en cualquier momento la modalidad de
+// trabajo de un trabajador (y su horario) — por ejemplo, si pasa de
+// presencial a teletrabajo, o cambia qué días son cuáles en modalidad mixta.
+export async function actualizarPerfilYHorario(db, dni, perfilTrabajo, horarioSemanal) {
+  const dniDigits = soloDigitos(dni);
+  if (!dniDigits) return { ok: false, mensaje: 'DNI/NIE no válido.' };
+  if (PERFILES_TRABAJO_VALIDOS.indexOf(perfilTrabajo) === -1) return { ok: false, mensaje: 'Modalidad de trabajo no válida.' };
+
+  const ref = doc(db, 'trabajadores', dniDigits);
+  const snap = await getDoc(ref);
+  if (!snap.exists()) return { ok: false, mensaje: 'No se encontró ningún trabajador con ese DNI/NIE.' };
+
+  await updateDoc(ref, { perfilTrabajo: perfilTrabajo });
+  const diasGuardados = await guardarHorarioSemanal(db, dniDigits, perfilTrabajo, horarioSemanal);
+
+  return { ok: true, nombre: mapearTrabajador(dniDigits, snap.data()).nombre, diasHorario: diasGuardados };
 }
 
 export async function cambiarEstadoActivo(db, dni, activo) {
@@ -382,8 +800,33 @@ export async function cambiarEstadoActivo(db, dni, activo) {
   const ref = doc(db, 'trabajadores', dniDigits);
   const snap = await getDoc(ref);
   if (!snap.exists()) return { ok: false, mensaje: 'No se encontró ningún trabajador con ese DNI/NIE.' };
+
   await updateDoc(ref, { activo: !!activo });
+
+  // Al dar de baja: se elimina su código de fichaje (deja de poder fichar
+  // y de poder entrar a "Mis registros" al instante). Sus fichajes,
+  // incidencias y correcciones NO se tocan — se conservan, como exige la
+  // ley (mínimo 4 años).
+  if (!activo) {
+    try {
+      const privSnap = await getDoc(doc(db, 'trabajadores_privado', dniDigits));
+      const hashActual = privSnap.exists() ? privSnap.data().hashCodigoActual : null;
+      if (hashActual) await deleteDoc(doc(db, 'codigos_fichaje', hashActual));
+    } catch (e) { /* si no tenía código todavía, no hay nada que borrar */ }
+  }
+
   return { ok: true, nombre: mapearTrabajador(dniDigits, snap.data()).nombre, activo: !!activo };
+}
+
+// Trabajadores dados de baja: la "Gestión de trabajadores" los oculta por
+// defecto (siguen existiendo en Firestore, solo dejan de aparecer en el
+// día a día). Esta función es la que alimenta esa vista de archivo, para
+// cuando de verdad haga falta consultarlos (p. ej. una inspección).
+export async function obtenerListaTrabajadoresBaja(db) {
+  const snap = await getDocs(collection(db, 'trabajadores'));
+  const lista = snap.docs.map(function (d) { return mapearTrabajador(d.id, d.data()); }).filter(function (t) { return !t.activo; });
+  lista.sort(function (a, b) { return String(a.apellidos).localeCompare(String(b.apellidos), 'es'); });
+  return { ok: true, trabajadores: lista };
 }
 
 // =====================================================================
@@ -432,7 +875,11 @@ export async function anadirPeriodoCalendario(db, fechaInicioISO, fechaFinISO, t
 // =====================================================================
 // INFORMES: cálculo de periodos (idéntico al que tenían las Cloud Functions)
 // =====================================================================
-export const TIPOS_PERIODO_VALIDOS = ['diario', 'semanal', 'mensual', 'trimestral', 'semestral', 'anual'];
+// "historico_completo" es un caso especial: no tiene fechas de inicio/fin
+// fijas (calcularPeriodo no lo entiende), se resuelve aparte en
+// informes-cliente.js con obtenerDatosHistoricoCompleto. Es el que se debe
+// ofrecer obligatoriamente antes de dar de baja a un trabajador.
+export const TIPOS_PERIODO_VALIDOS = ['diario', 'semanal', 'mensual', 'trimestral', 'semestral', 'anual', 'historico_completo'];
 
 function ordinalTrimestre(n) { return { 1: '1er', 2: '2º', 3: '3er', 4: '4º' }[n] || (n + 'º'); }
 
@@ -503,36 +950,91 @@ export function calcularHorasTrabajadas(registros) {
   return horas + 'h ' + String(min).padStart(2, '0') + 'min';
 }
 
+// El estado de un registro ahora viene ya calculado (campo "estado") desde
+// construirRegistrosConCadenas — esta función se deja como envoltorio fino
+// por compatibilidad con quien todavía la llame, traduciendo el nuevo
+// estado a los mismos colores/etiquetas de siempre. corrAdmin/corrTrabajador
+// aquí son la última entrada de la cadena de ese fichajeId (no una búsqueda
+// por fecha/hora/tipo, que ya no es fiable con horario partido).
 export function estadoDeRegistro(r, correcciones) {
-  const necesitaCorreccion = !!r.advertencia;
-  const corrAdmin = correcciones.find(function (c) { return c.rolSolicitante === 'Administrador' && c.fechaOriginal === r.fecha && c.horaOriginal === r.hora && c.tipoRegistro === r.tipoIncidencia; });
-  const corrTrabajador = correcciones.find(function (c) { return c.rolSolicitante === 'Trabajador' && c.fechaOriginal === r.fecha && c.horaOriginal === r.hora && c.tipoRegistro === r.tipoIncidencia; });
-  if (corrAdmin) return { color: '#B9770E', etiqueta: 'Corregido', corrAdmin: corrAdmin, corrTrabajador: corrTrabajador };
-  if (corrTrabajador) return { color: '#6B3FA0', etiqueta: 'Solicitada', corrAdmin: null, corrTrabajador: corrTrabajador };
-  if (necesitaCorreccion) return { color: '#C0392B', etiqueta: 'Pendiente', corrAdmin: null, corrTrabajador: null };
+  const cadena = (correcciones || []).filter(function (c) { return c.fichajeId === r.fichajeId || c.fichajeId === r.id; })
+    .sort(function (a, b) { return (a.timestampMs || 0) - (b.timestampMs || 0); });
+  const corrAdmin = cadena.slice().reverse().find(function (c) { return c.rolSolicitante === 'Administrador'; }) || null;
+  const corrTrabajador = cadena.slice().reverse().find(function (c) { return c.rolSolicitante === 'Trabajador'; }) || null;
+  const estado = r.estado || (r.advertencia ? 'pendiente' : 'correcto');
+  if (estado === 'corregido') return { color: '#B9770E', etiqueta: 'Corregido', corrAdmin: corrAdmin, corrTrabajador: corrTrabajador };
+  if (estado === 'solicitada') return { color: '#6B3FA0', etiqueta: 'Solicitada', corrAdmin: null, corrTrabajador: corrTrabajador };
+  if (estado === 'pendiente') return { color: '#C0392B', etiqueta: 'Pendiente', corrAdmin: null, corrTrabajador: null };
   return { color: '#1F6F63', etiqueta: 'Correcto', corrAdmin: null, corrTrabajador: null };
 }
 
 // Datos de un trabajador para un rango de fechas (no solo un mes) — se
-// reutiliza obtenerRegistrosPorDni pero sin el filtro de mes/año exacto.
+// reutiliza la misma lógica que obtenerRegistrosPorDni pero sin el filtro
+// de mes/año exacto. El timestampMs de cada registro ya refleja el valor
+// OFICIAL (rectificado o no), para que calcularHorasTrabajadas cuente
+// siempre las horas correctas en los informes.
 export async function obtenerDatosPeriodo(db, dni, inicio, fin) {
   const [fichajesSnap, incidenciasSnap, correccionesSnap] = await Promise.all([
     getDocs(collection(db, 'trabajadores', dni, 'fichajes')),
     getDocs(collection(db, 'trabajadores', dni, 'incidencias')),
     getDocs(collection(db, 'trabajadores', dni, 'correcciones'))
   ]);
-  const mapaTipoIncidencia = {};
-  incidenciasSnap.docs.forEach(function (d) { const i = d.data(); mapaTipoIncidencia[i.fecha + '|' + i.hora] = i.tipo; });
 
-  const registros = fichajesSnap.docs.map(function (d) { return d.data(); })
+  const construido = construirRegistrosConCadenas(fichajesSnap.docs, correccionesSnap.docs);
+  const registros = construido.registros
     .filter(function (f) { return fechaEnRango(f.fecha, inicio, fin); })
-    .map(function (f) { return { fecha: f.fecha, hora: f.hora, tipo: f.tipo, advertencia: f.advertencia || '', tipoIncidencia: mapaTipoIncidencia[f.fecha + '|' + f.hora] || f.tipo, timestampMs: f.timestampMs }; })
     .sort(function (a, b) { return (a.timestampMs || 0) - (b.timestampMs || 0); });
 
   const incidencias = incidenciasSnap.docs.map(function (d) { return d.data(); }).filter(function (i) { return fechaEnRango(i.fecha, inicio, fin); });
-  const correcciones = correccionesSnap.docs.map(function (d) { return d.data(); }).filter(function (c) { return fechaEnRango(c.fechaOriginal, inicio, fin); });
+  const correcciones = construido.correccionesTodas.filter(function (c) { return fechaEnRango(c.fechaOriginal, inicio, fin); });
 
   return { registros: registros, incidencias: incidencias, correcciones: correcciones };
+}
+
+// Todo el historial de un trabajador, sin límite de fechas — lo necesita el
+// informe "histórico completo" que se debe poder descargar obligatoriamente
+// antes de dar de baja a alguien (la ley exige poder entregarle TODO su
+// registro, desde el primer día que fichó, no solo un periodo concreto).
+export async function obtenerDatosHistoricoCompleto(db, dni) {
+  const [fichajesSnap, incidenciasSnap, correccionesSnap] = await Promise.all([
+    getDocs(collection(db, 'trabajadores', dni, 'fichajes')),
+    getDocs(collection(db, 'trabajadores', dni, 'incidencias')),
+    getDocs(collection(db, 'trabajadores', dni, 'correcciones'))
+  ]);
+
+  const construido = construirRegistrosConCadenas(fichajesSnap.docs, correccionesSnap.docs);
+  const registros = construido.registros.sort(function (a, b) { return (a.timestampMs || 0) - (b.timestampMs || 0); });
+
+  const incidencias = incidenciasSnap.docs.map(function (d) { return d.data(); });
+  const correcciones = construido.correccionesTodas;
+
+  const etiqueta = registros.length > 0
+    ? 'Histórico completo (del ' + registros[0].fecha + ' al ' + registros[registros.length - 1].fecha + ')'
+    : 'Histórico completo (sin fichajes registrados)';
+
+  return { registros: registros, incidencias: incidencias, correcciones: correcciones, etiqueta: etiqueta };
+}
+
+// ---------- AUDITORÍA DE DESCARGAS CERTIFICADAS ----------
+// Cada vez que se genera un informe (PDF/Excel) queda un rastro
+// independiente e inalterable de quién lo pidió, cuándo, y la huella
+// (SHA-256) exacta de los datos que llevaba en ese momento — así se puede
+// comprobar más adelante si un documento descargado ha sido manipulado.
+// Si este registro falla por lo que sea, la descarga no se bloquea por eso.
+export async function registrarDescargaCertificada(db, auth, datos) {
+  if (!auth || !auth.currentUser) return { ok: false };
+  try {
+    const ahora = new Date();
+    await addDoc(collection(db, 'descargas_certificadas'), Object.assign({
+      generadoPorUid: auth.currentUser.uid,
+      generadoPorEmail: auth.currentUser.email || '',
+      generadoElMs: ahora.getTime(),
+      generadoEl: formatearFecha(ahora) + ' ' + formatearHoraCompleta(ahora)
+    }, datos));
+    return { ok: true };
+  } catch (e) {
+    return { ok: false };
+  }
 }
 
 export async function obtenerTrabajadorCompleto(db, dni) {
@@ -573,9 +1075,12 @@ export async function comprobarAusenciasDeHoy(db) {
     const claveDia = Object.keys(horarioSemanal).find(function (d) { return normalizarDia(d) === normalizarDia(diaSemana); });
     if (!claveDia) continue; // no le toca trabajar hoy
     const horarioHoy = horarioSemanal[claveDia];
+    if (tieneLibertadHorariaHoy(t.perfilTrabajo, horarioHoy)) continue; // libertad horaria: no se puede hablar de "ausencia" por no haber fichado a una hora concreta
+    const tramosHoy = obtenerTramosValidos(horarioHoy);
+    if (tramosHoy.length === 0) continue; // sin ninguna franja horaria no hay nada que comprobar
 
-    // ¿Ya pasó su hora de entrada (con margen)?
-    const [hE, mE] = String(horarioHoy.entrada).split(':').map(Number);
+    // ¿Ya pasó la hora de entrada de su PRIMERA franja del día (con margen)?
+    const [hE, mE] = String(tramosHoy[0].entrada).split(':').map(Number);
     const minutosLimite = hE * 60 + mE + TOLERANCIA_MIN;
     const minutosAhora = ahora.getHours() * 60 + ahora.getMinutes();
     if (minutosAhora < minutosLimite) continue; // todavía no le toca

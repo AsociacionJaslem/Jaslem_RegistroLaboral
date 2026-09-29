@@ -6,6 +6,40 @@
 export const ZONA_HORARIA = 'Atlantic/Canary';
 export const TOLERANCIA_MIN = 10;
 
+// ---------- CÓDIGO DE FICHAJE DEL TRABAJADOR (6 dígitos, elegido por él) ----------
+// Nunca se guarda el código en texto plano en ningún sitio — ni en
+// Firestore ni en Firebase Authentication se puede leer luego el valor
+// original, solo comprobar si uno coincide. Aquí se calcula su huella
+// digital (SHA-256, con el "crypto" que trae el propio navegador, sin
+// librerías externas) para poder encontrar de quién es un código sin
+// tener que guardar el código en sí.
+export async function calcularHashCodigo(codigo) {
+  const texto = String(codigo || '').trim();
+  const bytes = new TextEncoder().encode('jaslem-codigo-fichaje:' + texto);
+  const hashBuffer = await crypto.subtle.digest('SHA-256', bytes);
+  return Array.from(new Uint8Array(hashBuffer)).map(function (b) { return b.toString(16).padStart(2, '0'); }).join('');
+}
+
+export function codigoValido(codigo) {
+  return /^[0-9]{6}$/.test(String(codigo || '').trim());
+}
+
+// ---------- CÓDIGO DE VERIFICACIÓN DE INFORMES DESCARGADOS ----------
+// Huella (SHA-256) del CONTENIDO de un informe (los datos, no el archivo
+// final ya maquetado). Sirve para comprobar más tarde si un PDF/Excel
+// descargado se corresponde exactamente con lo que había en ese momento en
+// el sistema: si alguien cambia una sola coma del documento, esta huella ya
+// no coincidirá con la guardada en "descargas_certificadas".
+export async function calcularHuellaTexto(texto) {
+  const bytes = new TextEncoder().encode(String(texto));
+  const hashBuffer = await crypto.subtle.digest('SHA-256', bytes);
+  return Array.from(new Uint8Array(hashBuffer)).map(function (b) { return b.toString(16).padStart(2, '0'); }).join('');
+}
+
+export function formatearCodigoVerificacion(huellaHex) {
+  return String(huellaHex || '').toUpperCase().match(/.{1,4}/g).join('-');
+}
+
 // Lista cerrada de motivos (orden alfabético). Debe coincidir EXACTAMENTE
 // con MOTIVOS_CORRECCION en el resto del código.
 export const MOTIVOS_CORRECCION = [
@@ -96,42 +130,117 @@ function obtenerOffsetMinutosCanarias(fecha) {
   return match ? Number(match[1]) * 60 : 0;
 }
 
+// Igual que combinarFechaHoraCanarias, pero para cuando la FECHA tampoco es
+// "ahora" (p. ej. al calcular el instante real de una hora rectificada por
+// un administrador, con su propia fecha en formato "DD/MM/AAAA").
+export function combinarFechaYHoraCanarias(fechaStr, horaStr) {
+  const partesFecha = String(fechaStr).split('/').map(Number);
+  const dia = partesFecha[0] || 1, mes = partesFecha[1] || 1, anio = partesFecha[2] || 1970;
+  const partesHora = String(horaStr).split(':').map(Number);
+  const horas = partesHora[0] || 0;
+  const minutos = partesHora[1] || 0;
+  const segundos = partesHora[2] || 0;
+  const candidatoUTC = new Date(Date.UTC(anio, mes - 1, dia, horas, minutos, segundos));
+  const offsetMin = obtenerOffsetMinutosCanarias(candidatoUTC);
+  return new Date(candidatoUTC.getTime() - offsetMin * 60000);
+}
+
 export function nombreMes(mes) {
   const meses = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
   return meses[mes - 1];
 }
 
-// Evalúa si un fichaje cae dentro o fuera de la jornada laboral. La
-// PRIMERA entrada del día se evalúa de forma estricta (con el margen de
-// tolerancia). Las entradas siguientes (p. ej. al volver de un descanso)
-// son libres mientras caigan dentro de la ventana completa de la jornada.
-// Las salidas siempre se evalúan contra la ventana completa.
-export function evaluarPuntualidad(horario, tipo, ahora, esPrimeraEntradaDelDia) {
-  if (!horario || !horario.entrada || !horario.salida) return { fueraDeTiempo: false };
+function dentroDeMargen(momento, esperado) {
+  return Math.abs(momento.getTime() - esperado.getTime()) / 60000 <= TOLERANCIA_MIN;
+}
 
-  const horaEntradaEsperada = combinarFechaHoraCanarias(ahora, horario.entrada);
-  const horaSalidaEsperada = combinarFechaHoraCanarias(ahora, horario.salida);
-  const inicioVentana = new Date(horaEntradaEsperada.getTime() - TOLERANCIA_MIN * 60000);
-  const finVentana = new Date(horaSalidaEsperada.getTime() + TOLERANCIA_MIN * 60000);
+// ---------- HORARIO PARTIDO (varias franjas / "tramos" horarios al día) ----------
+// El horario de un día puede guardarse de dos formas:
+//   - Formato nuevo:  { tramos: [ {entrada:'08:00', salida:'13:00'}, {entrada:'15:00', salida:'18:00'} ], modalidad? }
+//     Admite CUALQUIER número de tramos (uno, dos, tres o más franjas al día).
+//   - Formato antiguo (compatibilidad con datos ya guardados):
+//       { entrada:'08:00', salida:'17:00', pausaInicio?:'13:00', pausaFin?:'14:00' }
+// obtenerTramosValidos() traduce cualquiera de los dos formatos a una lista
+// de tramos {entrada, salida} en orden, para que el resto del código (aquí y
+// en firestore-datos.js) no tenga que preocuparse de cuál se usó al guardar.
+export function obtenerTramosValidos(horarioDia) {
+  if (!horarioDia) return [];
+  if (Array.isArray(horarioDia.tramos)) {
+    return horarioDia.tramos.filter(function (t) { return t && t.entrada && t.salida; });
+  }
+  // Formato antiguo: un único entrada/salida, con pausa opcional que lo
+  // parte en dos tramos.
+  if (horarioDia.entrada && horarioDia.salida) {
+    if (horarioDia.pausaInicio && horarioDia.pausaFin) {
+      return [
+        { entrada: horarioDia.entrada, salida: horarioDia.pausaInicio },
+        { entrada: horarioDia.pausaFin, salida: horarioDia.salida }
+      ];
+    }
+    return [{ entrada: horarioDia.entrada, salida: horarioDia.salida }];
+  }
+  return [];
+}
+
+// Evalúa si un fichaje cae dentro o fuera de la jornada laboral prevista,
+// con un margen de tolerancia de TOLERANCIA_MIN minutos EN CADA SENTIDO
+// (antes y después) alrededor de cada hora prevista concreta — nunca se
+// compara contra "toda la jornada de golpe".
+//
+// Un día puede tener varios tramos (horario partido: mañana, tarde, o más
+// franjas). Una ENTRADA se acepta si coincide con la entrada prevista de
+// CUALQUIER tramo de ese día; una SALIDA se acepta si coincide con la salida
+// prevista de CUALQUIER tramo. Si no coincide con ninguno, se compara contra
+// el tramo cuya hora prevista tenga más cerca, para dar un mensaje útil.
+export function evaluarPuntualidad(horarioDia, tipo, ahora) {
+  const tramos = obtenerTramosValidos(horarioDia);
+  if (tramos.length === 0) return { fueraDeTiempo: false };
+
+  const campo = tipo === 'Entrada' ? 'entrada' : 'salida';
+  const candidatos = tramos.map(function (tramo, indice) {
+    return { indice: indice, horaStr: tramo[campo], esperado: combinarFechaHoraCanarias(ahora, tramo[campo]) };
+  });
+
+  for (let i = 0; i < candidatos.length; i++) {
+    if (dentroDeMargen(ahora, candidatos[i].esperado)) return { fueraDeTiempo: false };
+  }
+
+  // Ninguna coincide: nos quedamos con la más cercana para el mensaje.
+  let masCercano = candidatos[0];
+  for (let i = 1; i < candidatos.length; i++) {
+    if (Math.abs(ahora - candidatos[i].esperado) < Math.abs(ahora - masCercano.esperado)) {
+      masCercano = candidatos[i];
+    }
+  }
+  const diffMin = Math.round((ahora - masCercano.esperado) / 60000);
+  const esTarde = diffMin > 0;
 
   if (tipo === 'Entrada') {
-    if (esPrimeraEntradaDelDia) {
-      const diffMin = Math.round((ahora - horaEntradaEsperada) / 60000);
-      if (diffMin > TOLERANCIA_MIN) {
-        return { fueraDeTiempo: true, tipo: 'Retraso', detalle: 'Entrada con ' + diffMin + ' min de retraso (prevista ' + horario.entrada + ')', minutos: diffMin };
-      }
-      return { fueraDeTiempo: false };
+    if (masCercano.indice === 0) {
+      return {
+        fueraDeTiempo: true, tipo: esTarde ? 'Retraso' : 'Entrada anticipada',
+        detalle: 'Entrada con ' + Math.abs(diffMin) + ' min de ' + (esTarde ? 'retraso' : 'antelación') + ' (prevista ' + masCercano.horaStr + ')',
+        minutos: diffMin
+      };
     }
-    if (ahora >= inicioVentana && ahora <= finVentana) return { fueraDeTiempo: false };
-    const diffMin = Math.round((ahora - horaEntradaEsperada) / 60000);
-    return { fueraDeTiempo: true, tipo: 'Retraso', detalle: 'Entrada con ' + diffMin + ' min de retraso, fuera de la jornada prevista (' + horario.entrada + ' - ' + horario.salida + ')', minutos: diffMin };
+    return {
+      fueraDeTiempo: true, tipo: 'Entrada fuera de horario',
+      detalle: 'Entrada con ' + Math.abs(diffMin) + ' min de diferencia sobre la entrada prevista del tramo (' + masCercano.horaStr + ')',
+      minutos: diffMin
+    };
   }
 
-  if (ahora >= inicioVentana && ahora <= finVentana) return { fueraDeTiempo: false };
-  if (ahora > finVentana) {
-    const diffMin = Math.round((ahora - horaSalidaEsperada) / 60000);
-    return { fueraDeTiempo: true, tipo: 'Posibles horas extra', detalle: 'Salida ' + diffMin + ' min más tarde de lo previsto (prevista ' + horario.salida + ')', minutos: diffMin };
+  // Salida
+  if (masCercano.indice === tramos.length - 1 && esTarde) {
+    return {
+      fueraDeTiempo: true, tipo: 'Posibles horas extra',
+      detalle: 'Salida ' + diffMin + ' min más tarde de lo previsto (prevista ' + masCercano.horaStr + ')',
+      minutos: diffMin
+    };
   }
-  const diffMin = Math.round((horaSalidaEsperada - ahora) / 60000);
-  return { fueraDeTiempo: true, tipo: 'Salida anticipada', detalle: 'Salida ' + diffMin + ' min antes de lo previsto (prevista ' + horario.salida + ')', minutos: -diffMin };
+  return {
+    fueraDeTiempo: true, tipo: 'Salida anticipada',
+    detalle: 'Salida con ' + Math.abs(diffMin) + ' min de diferencia sobre la salida prevista (' + masCercano.horaStr + ')',
+    minutos: diffMin
+  };
 }
