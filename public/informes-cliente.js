@@ -259,10 +259,9 @@ function generarExcel(trabajador, periodo, datos, certificacion) {
   const filas = [
     [NOMBRE_ORGANIZACION + ' — Informe de ' + periodo.etiqueta],
     ['Trabajador: ' + trabajador.nombre + '   DNI/NIE: ' + trabajador.dni + (trabajador.categoria ? '   Categoría: ' + trabajador.categoria : '')],
-    ['Horas trabajadas en el periodo: ' + calcularHorasTrabajadas(datos.registros)],
-    [],
-    ['Fecha', 'Hora', 'Tipo', 'Estado', 'Detalle']
+    ['Horas trabajadas en el periodo: ' + calcularHorasTrabajadas(datos.registros)]
   ];
+  filas.push([], ['Fecha', 'Hora', 'Tipo', 'Estado', 'Detalle']);
   datos.registros.forEach(function (r) {
     const estado = estadoDeRegistro(r, datos.correcciones);
     filas.push([r.fecha, r.hora, r.tipo, estado.etiqueta, (r.advertencia || '').replace('ADVERTENCIA: ', '')]);

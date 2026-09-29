@@ -126,6 +126,7 @@
     .fila-registro.deshabilitada { opacity: 0.4; pointer-events: none; }
 
     /* ---------- MIS REGISTROS: cabecera con "Cerrar Usuario" ---------- */
+    .panel-objetivo-teletrabajo { background: #EAF4F1; border-radius: 12px; padding: 10px 12px; margin-bottom: 12px; font-size: 12.5px; color: var(--verde-oscuro); line-height: 1.5; }
     .cabecera-mis-registros { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; }
     .titulo-mis-registros { font-weight: 800; color: var(--verde-oscuro); font-size: 14px; }
     .btn-cerrar-usuario { background: none; border: none; color: var(--rojo-error); font-size: 12px; font-weight: 700; cursor: pointer; padding: 4px; }
@@ -208,7 +209,7 @@
       opacity: 0; visibility: hidden; transition: opacity 0.2s ease; padding: 20px;
     }
     .popup-overlay.activo { opacity: 1; visibility: visible; }
-    .popup-card { background: var(--blanco); border-radius: 20px; max-width: 380px; width: 100%; overflow: hidden; box-shadow: 0 20px 50px rgba(0,0,0,0.3); transform: scale(0.92); transition: transform 0.2s ease; }
+    .popup-card { background: var(--blanco); border-radius: 20px; max-width: 380px; width: 100%; max-height: 90vh; overflow-y: auto; overflow-x: hidden; box-shadow: 0 20px 50px rgba(0,0,0,0.3); transform: scale(0.92); transition: transform 0.2s ease; }
     .popup-overlay.activo .popup-card { transform: scale(1); }
     .popup-header { padding: 18px 24px 14px; text-align: center; }
     .popup-header img { height: 30px; opacity: 0.95; }
@@ -295,6 +296,8 @@
     .horario-tramo-fila span { text-align: center; font-size: 11px; opacity: 0.6; }
     .horario-tramo-fila input[type="time"] { padding: 6px; border-radius: 8px; border: 1px solid #DCEAE7; font-size: 12px; }
     .btn-quitar-tramo { border: none; border-radius: 8px; width: 24px; height: 24px; font-size: 11px; font-weight: 800; cursor: pointer; background: #FBEAE8; color: var(--rojo-error); }
+    .horario-teletrabajo-horas { margin-bottom: 8px; padding: 8px; border-radius: 10px; background: #F4F9F7; }
+    .horario-teletrabajo-horas input[type="number"] { max-width: 100px; }
     .etiqueta-perfil-trabajo { display:inline-block; font-size:10.5px; font-weight:700; padding:2px 8px; border-radius:20px; margin-left:6px; vertical-align:middle; }
     .etiqueta-perfil-trabajo.presencial { background:#E3F3EF; color:var(--btn-entrada); }
     .etiqueta-perfil-trabajo.teletrabajo { background:#E3EEFB; color:#2C5F8A; }
@@ -376,6 +379,10 @@
             <option value="mixta">Mixta (presencial + teletrabajo)</option>
           </select>
           <div class="ayuda-pin" id="ed-ayuda-perfil" style="margin-top:4px;margin-bottom:10px;"></div>
+          <div id="ed-objetivo-teletrabajo" style="display:none;margin-bottom:10px;">
+            <label class="etiqueta-campo">Horas semanales de teletrabajo (objetivo)</label>
+            <input type="number" step="0.5" min="0" class="campo-texto" id="ed-horasSemanalesTeletrabajo" placeholder="Ej. 37,5">
+          </div>
           <div id="ed-horario-contenedor"></div>
           <div class="fila-form-botones" style="margin-top:14px;">
             <button class="btn-enviar-correccion" onclick="guardarEdicionHorario()">Guardar</button>
@@ -589,6 +596,10 @@
                 <option value="mixta">Mixta (presencial + teletrabajo)</option>
               </select>
               <div class="ayuda-pin" id="nt-ayuda-perfil" style="margin-top:4px;">Su horario se compara siempre con la hora real de fichaje (10 min de margen).</div>
+              <div id="nt-objetivo-teletrabajo" style="display:none;margin-top:8px;">
+                <label class="etiqueta-campo">Horas semanales de teletrabajo (objetivo)</label>
+                <input type="number" step="0.5" min="0" class="campo-texto" id="nt-horasSemanalesTeletrabajo" placeholder="Ej. 37,5">
+              </div>
 
               <div class="ayuda-pin" style="margin-top:10px;">Horario semanal (opcional aquí — también se puede añadir después). Deja vacíos los días que no trabaje.</div>
               <div id="horario-nuevo-trabajador"></div>
@@ -1172,9 +1183,28 @@
     // puede solicitar una corrección sobre CUALQUIER registro (no solo los
     // marcados en rojo) — el botón solo se oculta mientras ya haya una
     // solicitud sin resolver sobre ese mismo fichaje.
+    // Panel con el objetivo de horas semanales de teletrabajo (100% o la
+    // parte de teletrabajo de un "mixta") y cuántas horas quedan pendientes
+    // esta semana, según va fichando libremente. Solo aparece si el
+    // administrador le ha fijado un objetivo.
+    function htmlObjetivoTeletrabajo(res) {
+      const obj = res.objetivoTeletrabajo;
+      if (!obj || !obj.aplica || !obj.semanas || obj.semanas.length === 0) return '';
+      const actual = obj.semanas[obj.semanas.length - 1];
+      const pendienteTxt = actual.pendiente > 0
+        ? actual.pendiente + 'h pendientes esta semana'
+        : (actual.pendiente < 0 ? ('objetivo cumplido (' + Math.abs(actual.pendiente) + 'h de más)') : 'objetivo cumplido esta semana');
+      let html = '<div class="panel-objetivo-teletrabajo">' +
+        '<strong>Teletrabajo — objetivo semanal: ' + obj.horasSemanales + 'h</strong><br>' +
+        'Semana del ' + actual.inicio + ' al ' + actual.fin + ': ' + actual.horasTrabajadas + 'h fichadas, ' + pendienteTxt +
+        '</div>';
+      return html;
+    }
+
     function renderizarMisRegistros(res, contenedor) {
+      const panelObjetivo = htmlObjetivoTeletrabajo(res);
       if (res.registros.length === 0) {
-        contenedor.innerHTML = '<div class="vacio">Sin fichajes este mes.</div>';
+        contenedor.innerHTML = panelObjetivo + '<div class="vacio">Sin fichajes este mes.</div>';
         return;
       }
       function cadenaDe(r) {
@@ -1227,7 +1257,7 @@
         '<span><span class="punto violeta"></span> Corrección ya solicitada</span>' +
         '<span><span class="punto naranja"></span> Corregido por la empresa</span>' +
         '</div>';
-      contenedor.innerHTML = html;
+      contenedor.innerHTML = panelObjetivo + html;
       contenedor.querySelectorAll('.link-corregir').forEach(function (btn) {
         btn.addEventListener('click', function (e) {
           e.stopPropagation();
@@ -1865,19 +1895,23 @@
       DIAS_SEMANA_HORARIO.forEach(function (dia) {
         const existente = (valoresExistentes && valoresExistentes[dia]) || {};
         const tramos = tramosDesdeHorarioDia(existente);
+        const modalidadExistente = (esMixta && existente.modalidad === 'teletrabajo') ? 'teletrabajo' : 'presencial';
         html += '<div class="horario-dia-fila-cabecera"><span>' + dia + '</span>';
         if (esMixta) {
-          const modalidadExistente = existente.modalidad || 'presencial';
-          html += '<select id="' + prefijo + '-horario-' + dia + '-modalidad">' +
+          html += '<select id="' + prefijo + '-horario-' + dia + '-modalidad" onchange="actualizarVisibilidadDiaMixta(\'' + prefijo + '\',\'' + dia + '\')">' +
             '<option value="presencial"' + (modalidadExistente === 'presencial' ? ' selected' : '') + '>Presencial</option>' +
-            '<option value="teletrabajo"' + (modalidadExistente === 'teletrabajo' ? ' selected' : '') + '>Teletrabajo</option>' +
-            '<option value="mixta"' + (modalidadExistente === 'mixta' ? ' selected' : '') + '>Mixto ese día</option>' +
+            '<option value="teletrabajo"' + (modalidadExistente === 'teletrabajo' ? ' selected' : '') + '>Teletrabajo (sin fichar)</option>' +
             '</select>';
         }
         html += '<button type="button" class="btn-anadir-tramo" data-dia="' + dia + '" data-prefijo="' + prefijo + '">+ Añadir franja</button></div>' +
           '<div class="horario-tramos-contenedor" id="' + prefijo + '-tramos-' + dia + '">' +
           (tramos.length > 0 ? tramos.map(filaTramoHtml).join('') : filaTramoHtml(null)) +
           '</div>';
+        if (esMixta) {
+          html += '<div class="horario-teletrabajo-horas" id="' + prefijo + '-horas-' + dia + '">' +
+            'Ese día ficha libremente (entrada/salida), sin comparar con ningún horario — como un 100% teletrabajo. Sus horas reales descuentan del objetivo semanal de teletrabajo.' +
+            '</div>';
+        }
       });
       const contenedor = document.getElementById(contenedorId);
       contenedor.innerHTML = html;
@@ -1895,11 +1929,39 @@
       contenedor.querySelectorAll('.btn-quitar-tramo').forEach(function (btn) {
         btn.addEventListener('click', function () { btn.closest('.horario-tramo-fila').remove(); });
       });
+
+      if (esMixta) {
+        DIAS_SEMANA_HORARIO.forEach(function (dia) { actualizarVisibilidadDiaMixta(prefijo, dia); });
+      }
+    }
+
+    // Un día de un trabajador "mixta" es Presencial (con sus franjas
+    // horarias) o Teletrabajo (sin fichar, con un número de horas fijo que
+    // se cuenta directamente) — nunca las dos cosas a la vez, así que se
+    // muestra un bloque u otro según lo que se elija en el desplegable.
+    function actualizarVisibilidadDiaMixta(prefijo, dia) {
+      const modalidadEl = document.getElementById(prefijo + '-horario-' + dia + '-modalidad');
+      const esTeletrabajo = !!modalidadEl && modalidadEl.value === 'teletrabajo';
+      const tramosEl = document.getElementById(prefijo + '-tramos-' + dia);
+      const horasEl = document.getElementById(prefijo + '-horas-' + dia);
+      const btnAnadir = document.querySelector('.btn-anadir-tramo[data-prefijo="' + prefijo + '"][data-dia="' + dia + '"]');
+      if (tramosEl) tramosEl.style.display = esTeletrabajo ? 'none' : '';
+      if (btnAnadir) btnAnadir.style.display = esTeletrabajo ? 'none' : '';
+      if (horasEl) horasEl.style.display = esTeletrabajo ? 'block' : 'none';
     }
 
     function leerFormularioHorario(prefijo, perfil) {
       const horarioSemanal = {};
+      const esMixta = perfil === 'mixta';
       DIAS_SEMANA_HORARIO.forEach(function (dia) {
+        if (esMixta) {
+          const modalidadEl = document.getElementById(prefijo + '-horario-' + dia + '-modalidad');
+          const modalidad = modalidadEl ? modalidadEl.value : 'presencial';
+          if (modalidad === 'teletrabajo') {
+            horarioSemanal[dia] = { modalidad: 'teletrabajo' };
+            return;
+          }
+        }
         const contenedor = document.getElementById(prefijo + '-tramos-' + dia);
         const tramos = [];
         if (contenedor) {
@@ -1911,10 +1973,7 @@
         }
         if (tramos.length > 0) {
           const fila = { tramos: tramos };
-          if (perfil === 'mixta') {
-            const modalidadEl = document.getElementById(prefijo + '-horario-' + dia + '-modalidad');
-            fila.modalidad = modalidadEl ? modalidadEl.value : 'presencial';
-          }
+          if (esMixta) fila.modalidad = 'presencial';
           horarioSemanal[dia] = fila;
         }
       });
@@ -1923,14 +1982,16 @@
 
     const TEXTOS_AYUDA_PERFIL = {
       presencial: 'Su horario se compara siempre con la hora real de fichaje (10 min de margen).',
-      teletrabajo: 'Libertad horaria: al fichar en teletrabajo no se compara con ningún horario — nunca se avisará de retraso o salida anticipada.',
-      mixta: 'Marca en cada día si ese día es presencial (se compara con el horario) o teletrabajo/mixto (libertad horaria, sin comparar).'
+      teletrabajo: 'Libertad horaria: ficha libremente (entrada/salida), sin comparar con ningún horario. Sus horas reales van descontando el objetivo de horas semanales indicado abajo.',
+      mixta: 'Marca en cada día si ese día es Presencial (con su horario y franjas, se compara con el fichaje) o Teletrabajo (ficha libremente ese día, como un 100% teletrabajo). Las horas de los días de teletrabajo descuentan el objetivo semanal indicado abajo.'
     };
 
     function alCambiarPerfilTrabajo(prefijo) {
       const perfil = document.getElementById(prefijo + '-perfil').value;
       const ayudaEl = document.getElementById(prefijo + '-ayuda-perfil');
       if (ayudaEl) ayudaEl.textContent = TEXTOS_AYUDA_PERFIL[perfil] || '';
+      const objetivoEl = document.getElementById(prefijo + '-objetivo-teletrabajo');
+      if (objetivoEl) objetivoEl.style.display = (perfil === 'teletrabajo' || perfil === 'mixta') ? 'block' : 'none';
       const contenedorId = prefijo === 'nt' ? 'horario-nuevo-trabajador' : 'ed-horario-contenedor';
       const valoresExistentes = prefijo === 'ed' ? window.__edHorarioActual : null;
       construirFormularioHorario(prefijo, contenedorId, perfil, valoresExistentes);
@@ -1953,17 +2014,19 @@
       if (!dni) { mostrarPopup('Falta el DNI/NIE', 'Indica el DNI o NIE del trabajador.', 'error'); return; }
 
       const horarioSemanal = leerFormularioHorario('nt', perfilTrabajo);
+      const horasSemanalesTeletrabajo = document.getElementById('nt-horasSemanalesTeletrabajo').value;
 
       mostrarCargando();
       datosFirestore.anadirTrabajador(db, {
         apellidos: apellidos, nombre: nombre, dni: dni, nss: nss, categoria: categoria,
-        email: email, perfilTrabajo: perfilTrabajo, horarioSemanal: horarioSemanal
+        email: email, perfilTrabajo: perfilTrabajo, horarioSemanal: horarioSemanal,
+        horasSemanalesTeletrabajo: horasSemanalesTeletrabajo
       })
         .then(function (res) {
           ocultarCargando();
           if (!res.ok) { mostrarPopup('No se pudo dar de alta', res.mensaje, 'error'); return; }
           mostrarPopup('Trabajador dado de alta', res.nombre + (res.diasHorario ? '\nHorario guardado: ' + res.diasHorario + ' día(s)' : ''), 'ok', function () {
-            ['nt-apellidos', 'nt-nombre', 'nt-dni', 'nt-nss', 'nt-categoria', 'nt-email'].forEach(function (id) { document.getElementById(id).value = ''; });
+            ['nt-apellidos', 'nt-nombre', 'nt-dni', 'nt-nss', 'nt-categoria', 'nt-email', 'nt-horasSemanalesTeletrabajo'].forEach(function (id) { document.getElementById(id).value = ''; });
             document.getElementById('nt-perfil').value = 'presencial';
             alCambiarPerfilTrabajo('nt');
             cargarListaTrabajadores();
@@ -1982,6 +2045,7 @@
           document.getElementById('ed-horario-dni').value = dni;
           document.getElementById('ed-horario-titulo').textContent = 'Modalidad y horario de ' + res.nombre;
           document.getElementById('ed-perfil').value = res.perfilTrabajo;
+          document.getElementById('ed-horasSemanalesTeletrabajo').value = res.horasSemanalesTeletrabajo || '';
           window.__edHorarioActual = res.horarioSemanal;
           alCambiarPerfilTrabajo('ed');
           document.getElementById('overlay-editar-horario').classList.add('activo');
@@ -1998,9 +2062,10 @@
       const dni = document.getElementById('ed-horario-dni').value;
       const perfilTrabajo = document.getElementById('ed-perfil').value;
       const horarioSemanal = leerFormularioHorario('ed', perfilTrabajo);
+      const horasSemanalesTeletrabajo = document.getElementById('ed-horasSemanalesTeletrabajo').value;
 
       mostrarCargando();
-      datosFirestore.actualizarPerfilYHorario(db, dni, perfilTrabajo, horarioSemanal)
+      datosFirestore.actualizarPerfilYHorario(db, dni, perfilTrabajo, horarioSemanal, horasSemanalesTeletrabajo)
         .then(function (res) {
           ocultarCargando();
           if (!res.ok) { mostrarPopup('No se pudo guardar', res.mensaje, 'error'); return; }

@@ -37,7 +37,11 @@ function mapearTrabajador(dni, datos) {
     nombre: apellidos && nombrePila ? (apellidos + ', ' + nombrePila) : (apellidos || nombrePila),
     categoria: (datos && datos.categoria) || '',
     activo: !datos || datos.activo !== false,
-    perfilTrabajo: perfilTrabajo
+    perfilTrabajo: perfilTrabajo,
+    // Objetivo de horas SEMANALES de teletrabajo (100% teletrabajo, o la
+    // parte de teletrabajo de un "mixta"). 0/ausente = sin objetivo fijado
+    // todavía (no se calculan horas pendientes para ese trabajador).
+    horasSemanalesTeletrabajo: Number((datos && datos.horasSemanalesTeletrabajo) || 0)
   };
 }
 
@@ -338,7 +342,22 @@ export async function obtenerMisRegistros(db, auth, mes, anio) {
   const trabajador = await buscarTrabajadorPorDni(db, enlaceSnap.data().dni);
   if (!trabajador) return { ok: false, mensaje: 'No se encontró tu ficha de trabajador.' };
   const datos = await obtenerRegistrosPorDni(db, trabajador.dni, mes, anio);
-  return Object.assign({ ok: true, nombre: trabajador.nombre }, datos);
+
+  // Si es teletrabajo/mixta con objetivo de horas semanales, se añade el
+  // resumen de horas pendientes del mes consultado (con fecha de corte
+  // "hoy" si es el mes en curso, o el último día de ese mes si es uno ya
+  // pasado).
+  let objetivoTeletrabajo = null;
+  if (trabajador.perfilTrabajo === 'teletrabajo' || trabajador.perfilTrabajo === 'mixta') {
+    const ahora = new Date();
+    const esMesActual = (Number(mes) === ahora.getMonth() + 1) && (Number(anio) === ahora.getFullYear());
+    const fechaCorte = esMesActual ? ahora : new Date(Number(anio), Number(mes), 0);
+    const iso = fechaCorte.getFullYear() + '-' + String(fechaCorte.getMonth() + 1).padStart(2, '0') + '-' + String(fechaCorte.getDate()).padStart(2, '0');
+    const resultado = await calcularHorasPendientesTeletrabajo(db, trabajador.dni, iso);
+    if (resultado.ok && resultado.aplica) objetivoTeletrabajo = resultado;
+  }
+
+  return Object.assign({ ok: true, nombre: trabajador.nombre, objetivoTeletrabajo: objetivoTeletrabajo }, datos);
 }
 
 // =====================================================================
@@ -688,8 +707,12 @@ export async function anadirTrabajador(db, datos) {
   if (existente.exists()) return { ok: false, mensaje: 'Ya existe un trabajador con ese DNI/NIE (activo o de baja).' };
 
   const perfilTrabajo = PERFILES_TRABAJO_VALIDOS.indexOf(datos.perfilTrabajo) !== -1 ? datos.perfilTrabajo : 'presencial';
+  const horasSemanalesTeletrabajo = (perfilTrabajo === 'teletrabajo' || perfilTrabajo === 'mixta') ? (Number(datos.horasSemanalesTeletrabajo) || 0) : 0;
 
-  await setDoc(ref, { apellidos: apellidos, nombre: nombre, categoria: String(datos.categoria || '').trim(), activo: true, perfilTrabajo: perfilTrabajo });
+  await setDoc(ref, {
+    apellidos: apellidos, nombre: nombre, categoria: String(datos.categoria || '').trim(), activo: true,
+    perfilTrabajo: perfilTrabajo, horasSemanalesTeletrabajo: horasSemanalesTeletrabajo
+  });
   await setDoc(doc(db, 'trabajadores_privado', dni), { nss: String(datos.nss || '').trim(), email: String(datos.email || '').trim() });
 
   const diasGuardados = await guardarHorarioSemanal(db, dni, perfilTrabajo, datos.horarioSemanal);
@@ -726,10 +749,13 @@ export async function actualizarDatosTrabajador(db, dni, datos) {
 // con soporte de horario partido: cada día puede tener varias franjas
 // horarias ("tramos"), no solo una entrada/salida. Si su modalidad es
 // "mixta", cada día guarda también qué modalidad le corresponde ESE día
-// (presencial/teletrabajo/mixta); si no, ese dato no hace falta guardarlo
-// (ya lo dice el perfil general del trabajador). Admite, por
-// compatibilidad, que un día llegue todavía en el formato antiguo (una
-// única entrada/salida, con pausa opcional).
+// (presencial/teletrabajo); si no, ese dato no hace falta guardarlo (ya lo
+// dice el perfil general del trabajador). Un día de TELETRABAJO dentro de
+// un "mixta" funciona exactamente como un trabajador 100% teletrabajo ESE
+// día: se ficha libremente (entrada/salida), sin comparar con ningún
+// horario — por eso no guarda tramos ni horas, solo la modalidad. Admite,
+// por compatibilidad, que un día presencial llegue todavía en el formato
+// antiguo (una única entrada/salida, con pausa opcional).
 async function guardarHorarioSemanal(db, dni, perfilTrabajo, horarioSemanal) {
   const horarioLimpio = {};
   let diasGuardados = 0;
@@ -738,6 +764,17 @@ async function guardarHorarioSemanal(db, dni, perfilTrabajo, horarioSemanal) {
       const h = horarioSemanal[dia];
       if (!h) return;
 
+      // Día de TELETRABAJO dentro de un perfil "mixta": libertad horaria
+      // total ese día, igual que un 100% teletrabajo — no hace falta
+      // definir tramos ni horas, solo marcar la modalidad.
+      if (perfilTrabajo === 'mixta' && h.modalidad === 'teletrabajo') {
+        horarioLimpio[dia] = { modalidad: 'teletrabajo' };
+        diasGuardados++;
+        return;
+      }
+
+      // Día presencial (o cualquier día de un perfil no-mixta): horario
+      // partido de varias franjas, igual que hasta ahora.
       let tramos = [];
       if (Array.isArray(h.tramos)) {
         tramos = h.tramos.filter(function (t) { return t && t.entrada && t.salida; });
@@ -749,9 +786,7 @@ async function guardarHorarioSemanal(db, dni, perfilTrabajo, horarioSemanal) {
       if (tramos.length === 0) return;
 
       const fila = { tramos: tramos };
-      if (perfilTrabajo === 'mixta') {
-        fila.modalidad = PERFILES_TRABAJO_VALIDOS.indexOf(h.modalidad) !== -1 ? h.modalidad : 'presencial';
-      }
+      if (perfilTrabajo === 'mixta') fila.modalidad = 'presencial';
       horarioLimpio[dia] = fila;
       diasGuardados++;
     });
@@ -761,6 +796,152 @@ async function guardarHorarioSemanal(db, dni, perfilTrabajo, horarioSemanal) {
   // también de Firestore y no quede fichando "libre" de casualidad.
   await setDoc(doc(db, 'horarios', dni), horarioLimpio);
   return diasGuardados;
+}
+
+// =====================================================================
+// TELETRABAJO: objetivo de horas SEMANALES y "horas pendientes"
+// =====================================================================
+// Aplica a los perfiles "teletrabajo" (100%) y a la parte de teletrabajo
+// de un "mixta" (los días de su horario marcados como tal). En ambos
+// casos el trabajador ficha libremente (entrada/salida, sin comparar con
+// ningún horario) y sus horas REALES van descontando un objetivo de horas
+// semanales fijado por el administrador. Sin Cloud Functions no hay nada
+// que guarde un contador aparte: se recalcula cada vez, repasando semana a
+// semana (lunes a domingo) desde el día 1 del mes hasta la fecha de
+// referencia. El déficit o exceso de una semana se arrastra a la
+// siguiente, pero SOLO dentro del mismo mes natural: cada mes empieza
+// siempre con el objetivo completo, sin arrastre del mes anterior.
+function lunesDeSemana(fecha) {
+  const diaISO = (fecha.getDay() + 6) % 7; // 0 = lunes ... 6 = domingo
+  return new Date(fecha.getFullYear(), fecha.getMonth(), fecha.getDate() - diaISO);
+}
+
+// ¿Ese día concreto cuenta para el objetivo de teletrabajo de este
+// trabajador? Para un 100% teletrabajo, cualquier día que le toque
+// trabajar (todos). Para un "mixta", solo los días de su horario marcados
+// como modalidad "teletrabajo".
+function diaCuentaComoTeletrabajo(perfilTrabajo, horarioSemanal, fecha) {
+  if (perfilTrabajo === 'teletrabajo') return true;
+  if (perfilTrabajo !== 'mixta' || !horarioSemanal) return false;
+  const diaSemana = obtenerDiaSemana(fecha);
+  const claveDia = Object.keys(horarioSemanal).find(function (d) { return normalizarDia(d) === normalizarDia(diaSemana); });
+  if (!claveDia) return false;
+  const h = horarioSemanal[claveDia];
+  return !!(h && h.modalidad === 'teletrabajo');
+}
+
+// Fechas (en formato DD/MM/YYYY) dentro de [inicio, fin] en las que este
+// trabajador tiene un día justificado (festivo de todo el equipo,
+// vacaciones o baja médica propias) según el calendario laboral.
+async function obtenerFechasAusenciaEnRango(db, dni, inicio, fin) {
+  const [festivosSnap, propiosSnap] = await Promise.all([
+    getDocs(query(collection(db, 'calendario'), where('tipo', '==', 'Festivo'))),
+    getDocs(query(collection(db, 'calendario'), where('trabajadorId', '==', dni)))
+  ]);
+  const fechas = new Set();
+  festivosSnap.forEach(function (d) { fechas.add(d.data().fecha); });
+  propiosSnap.forEach(function (d) {
+    const c = d.data();
+    if (c.tipo === 'Vacaciones' || c.tipo === 'BajaMedica') fechas.add(c.fecha);
+  });
+  const resultado = [];
+  fechas.forEach(function (fechaStr) { if (fechaEnRango(fechaStr, inicio, fin)) resultado.push(fechaStr); });
+  return resultado;
+}
+
+// Calcula, semana a semana desde el día 1 del mes de "fechaReferenciaISO"
+// (o de hoy, si no se indica) hasta esa fecha, el objetivo ajustado, las
+// horas ya trabajadas en días de teletrabajo, y las horas pendientes al
+// cierre de cada semana (puede ser negativo = se ha hecho de más).
+export async function calcularHorasPendientesTeletrabajo(db, dni, fechaReferenciaISO) {
+  const dniDigits = soloDigitos(dni);
+  if (!dniDigits) return { ok: false, mensaje: 'DNI/NIE no válido.' };
+  const trabajadorSnap = await getDoc(doc(db, 'trabajadores', dniDigits));
+  if (!trabajadorSnap.exists()) return { ok: false, mensaje: 'No se encontró ningún trabajador con ese DNI/NIE.' };
+  const trabajador = mapearTrabajador(dniDigits, trabajadorSnap.data());
+
+  if (trabajador.perfilTrabajo !== 'teletrabajo' && trabajador.perfilTrabajo !== 'mixta') {
+    return { ok: true, aplica: false };
+  }
+  const horasSemanales = Number(trabajador.horasSemanalesTeletrabajo) || 0;
+  if (horasSemanales <= 0) return { ok: true, aplica: false, nombre: trabajador.nombre };
+
+  const horarioSnap = await getDoc(doc(db, 'horarios', dniDigits));
+  const horarioSemanal = horarioSnap.exists() ? horarioSnap.data() : {};
+
+  const hoy = fechaReferenciaISO ? parsearFechaISO(fechaReferenciaISO) : new Date();
+  const hastaFecha = new Date(hoy.getFullYear(), hoy.getMonth(), hoy.getDate());
+  const inicioMes = new Date(hastaFecha.getFullYear(), hastaFecha.getMonth(), 1);
+  const finMes = new Date(hastaFecha.getFullYear(), hastaFecha.getMonth() + 1, 0);
+
+  const ausencias = await obtenerFechasAusenciaEnRango(db, dniDigits, inicioMes, finMes);
+
+  const fichajesSnap = await getDocs(query(
+    collection(db, 'trabajadores', dniDigits, 'fichajes'),
+    where('timestampMs', '>=', inicioMes.getTime()),
+    where('timestampMs', '<=', hastaFecha.getTime() + 86399999),
+    orderBy('timestampMs', 'asc')
+  ));
+  const fichajes = fichajesSnap.docs.map(function (d) { return d.data(); });
+
+  const semanas = [];
+  let arrastre = 0;
+  let cursorLunes = lunesDeSemana(inicioMes);
+  let guardas = 0;
+  while (cursorLunes <= hastaFecha && guardas < 60) {
+    guardas++;
+    const finSemana = new Date(cursorLunes.getFullYear(), cursorLunes.getMonth(), cursorLunes.getDate() + 6);
+    const diasSemanaEnMesHastaHoy = [];
+    for (let i = 0; i < 7; i++) {
+      const d = new Date(cursorLunes.getFullYear(), cursorLunes.getMonth(), cursorLunes.getDate() + i);
+      if (d >= inicioMes && d <= finMes && d <= hastaFecha) diasSemanaEnMesHastaHoy.push(d);
+    }
+    if (diasSemanaEnMesHastaHoy.length === 0) {
+      cursorLunes = new Date(cursorLunes.getFullYear(), cursorLunes.getMonth(), cursorLunes.getDate() + 7);
+      continue;
+    }
+
+    const diasAusenciaSemana = diasSemanaEnMesHastaHoy.filter(function (d) {
+      return d.getDay() !== 0 && d.getDay() !== 6 && ausencias.indexOf(formatearFecha(d)) !== -1;
+    }).length;
+    const objetivoAjustado = Math.max(0, horasSemanales - diasAusenciaSemana * (horasSemanales / 5)) + arrastre;
+
+    let minutosTrabajados = 0;
+    let entradaAbierta = null;
+    fichajes.forEach(function (f) {
+      const partes = String(f.fecha || '').split('/').map(Number);
+      if (partes.length !== 3) return;
+      const fechaFichaje = new Date(partes[2], partes[1] - 1, partes[0]);
+      if (fechaFichaje < cursorLunes || fechaFichaje > finSemana || fechaFichaje > hastaFecha) return;
+      if (!diaCuentaComoTeletrabajo(trabajador.perfilTrabajo, horarioSemanal, fechaFichaje)) return;
+      if (f.tipo === 'Entrada') {
+        entradaAbierta = f.timestampMs || null;
+      } else if (f.tipo === 'Salida' && entradaAbierta) {
+        if (f.timestampMs && f.timestampMs > entradaAbierta) minutosTrabajados += Math.round((f.timestampMs - entradaAbierta) / 60000);
+        entradaAbierta = null;
+      }
+    });
+    const horasTrabajadas = minutosTrabajados / 60;
+    const pendiente = Math.round((objetivoAjustado - horasTrabajadas) * 100) / 100;
+
+    semanas.push({
+      inicio: formatearFecha(cursorLunes),
+      fin: formatearFecha(finSemana <= finMes ? finSemana : finMes),
+      objetivo: Math.round(objetivoAjustado * 100) / 100,
+      horasTrabajadas: Math.round(horasTrabajadas * 100) / 100,
+      pendiente: pendiente,
+      esSemanaActual: hastaFecha >= cursorLunes && hastaFecha <= finSemana
+    });
+
+    arrastre = pendiente; // se arrastra a la semana siguiente, solo dentro del mismo mes
+    cursorLunes = new Date(cursorLunes.getFullYear(), cursorLunes.getMonth(), cursorLunes.getDate() + 7);
+  }
+
+  const ultima = semanas.length > 0 ? semanas[semanas.length - 1] : null;
+  return {
+    ok: true, aplica: true, nombre: trabajador.nombre, horasSemanales: horasSemanales,
+    semanas: semanas, pendienteActual: ultima ? ultima.pendiente : horasSemanales
+  };
 }
 
 // Perfil (modalidad de trabajo) y horario actuales de un trabajador — para
@@ -773,13 +954,20 @@ export async function obtenerPerfilYHorario(db, dni) {
   ]);
   if (!tSnap.exists()) return { ok: false, mensaje: 'No se encontró ningún trabajador con ese DNI/NIE.' };
   const t = mapearTrabajador(dniDigits, tSnap.data());
-  return { ok: true, perfilTrabajo: t.perfilTrabajo, nombre: t.nombre, horarioSemanal: hSnap.exists() ? hSnap.data() : {} };
+  return {
+    ok: true, perfilTrabajo: t.perfilTrabajo, nombre: t.nombre,
+    horasSemanalesTeletrabajo: t.horasSemanalesTeletrabajo,
+    horarioSemanal: hSnap.exists() ? hSnap.data() : {}
+  };
 }
 
 // El administrador puede cambiar en cualquier momento la modalidad de
 // trabajo de un trabajador (y su horario) — por ejemplo, si pasa de
 // presencial a teletrabajo, o cambia qué días son cuáles en modalidad mixta.
-export async function actualizarPerfilYHorario(db, dni, perfilTrabajo, horarioSemanal) {
+// horasSemanalesTeletrabajo solo se guarda (y solo tiene sentido) para los
+// perfiles "teletrabajo" y "mixta" — es el objetivo de horas semanales que
+// se van descontando según el trabajador ficha libremente.
+export async function actualizarPerfilYHorario(db, dni, perfilTrabajo, horarioSemanal, horasSemanalesTeletrabajo) {
   const dniDigits = soloDigitos(dni);
   if (!dniDigits) return { ok: false, mensaje: 'DNI/NIE no válido.' };
   if (PERFILES_TRABAJO_VALIDOS.indexOf(perfilTrabajo) === -1) return { ok: false, mensaje: 'Modalidad de trabajo no válida.' };
@@ -788,7 +976,8 @@ export async function actualizarPerfilYHorario(db, dni, perfilTrabajo, horarioSe
   const snap = await getDoc(ref);
   if (!snap.exists()) return { ok: false, mensaje: 'No se encontró ningún trabajador con ese DNI/NIE.' };
 
-  await updateDoc(ref, { perfilTrabajo: perfilTrabajo });
+  const horasSemanales = (perfilTrabajo === 'teletrabajo' || perfilTrabajo === 'mixta') ? (Number(horasSemanalesTeletrabajo) || 0) : 0;
+  await updateDoc(ref, { perfilTrabajo: perfilTrabajo, horasSemanalesTeletrabajo: horasSemanales });
   const diasGuardados = await guardarHorarioSemanal(db, dniDigits, perfilTrabajo, horarioSemanal);
 
   return { ok: true, nombre: mapearTrabajador(dniDigits, snap.data()).nombre, diasHorario: diasGuardados };
@@ -937,7 +1126,8 @@ function fechaEnRango(fechaStr, inicio, fin) {
 }
 
 export function calcularHorasTrabajadas(registros) {
-  let totalMin = 0, entradaAbierta = null;
+  let totalMin = 0;
+  let entradaAbierta = null;
   registros.forEach(function (r) {
     if (r.tipo === 'Entrada') {
       entradaAbierta = r.timestampMs || null;
