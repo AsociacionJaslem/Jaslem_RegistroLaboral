@@ -1026,16 +1026,28 @@ function parsearFechaISO(iso) {
   return new Date(partes[0], partes[1] - 1, partes[2]);
 }
 
-export async function anadirPeriodoCalendario(db, fechaInicioISO, fechaFinISO, tipo, dniTrabajador, nota) {
+// dnisTrabajadores: para "Vacaciones"/"BajaMedica", una lista de DNI/NIE
+// (uno o varios trabajadores a la vez — por ejemplo, todo un equipo que
+// coincide de vacaciones). Para "Festivo" se ignora: siempre afecta a todo
+// el equipo (trabajadorId null), como hasta ahora — así se usa igual para
+// un cierre por puente que para un festivo oficial, marcando el rango de
+// fechas que haga falta.
+export async function anadirPeriodoCalendario(db, fechaInicioISO, fechaFinISO, tipo, dnisTrabajadores, nota) {
   if (!fechaInicioISO || !tipo) return { ok: false, mensaje: 'Indica al menos la fecha de inicio y el tipo de día.' };
   if (['Festivo', 'Vacaciones', 'BajaMedica'].indexOf(tipo) === -1) return { ok: false, mensaje: 'Tipo de día no válido.' };
 
-  let trabajadorId = null, trabajadorNombre = 'Todo el equipo';
+  let trabajadores = [{ dni: null, nombre: 'Todo el equipo' }];
   if (tipo !== 'Festivo') {
-    if (!dniTrabajador) return { ok: false, mensaje: 'Indica el trabajador para vacaciones o baja médica.' };
-    const t = await buscarTrabajadorPorDni(db, dniTrabajador);
-    if (!t) return { ok: false, mensaje: 'No se encontró ningún trabajador con ese DNI/NIE.' };
-    trabajadorId = t.dni; trabajadorNombre = t.nombre;
+    const dnisLimpios = (Array.isArray(dnisTrabajadores) ? dnisTrabajadores : [dnisTrabajadores])
+      .map(function (d) { return soloDigitos(d); }).filter(Boolean);
+    if (dnisLimpios.length === 0) return { ok: false, mensaje: 'Indica al menos un trabajador para vacaciones o baja médica.' };
+
+    trabajadores = [];
+    for (const dniLimpio of dnisLimpios) {
+      const t = await buscarTrabajadorPorDni(db, dniLimpio);
+      if (!t) return { ok: false, mensaje: 'No se encontró ningún trabajador con el DNI/NIE ' + dniLimpio + '.' };
+      trabajadores.push({ dni: t.dni, nombre: t.nombre });
+    }
   }
 
   let inicio = parsearFechaISO(fechaInicioISO);
@@ -1044,21 +1056,28 @@ export async function anadirPeriodoCalendario(db, fechaInicioISO, fechaFinISO, t
 
   const diasTotales = Math.round((fin - inicio) / 86400000) + 1;
   if (diasTotales > 366) return { ok: false, mensaje: 'El periodo es demasiado largo (máximo 366 días).' };
+  if (diasTotales * trabajadores.length > 3000) return { ok: false, mensaje: 'Demasiados días × trabajadores de una vez. Hazlo en varios pasos más pequeños.' };
 
   const notaLimpia = nota ? String(nota).trim() : '';
   const registradoEl = formatearFecha(new Date());
-  const cursor = new Date(inicio);
   let contador = 0;
-  while (cursor <= fin) {
-    await addDoc(collection(db, 'calendario'), {
-      fecha: formatearFecha(cursor), tipo: tipo, trabajadorId: trabajadorId,
-      nota: notaLimpia, fechaRegistro: registradoEl
-    });
-    cursor.setDate(cursor.getDate() + 1);
-    contador++;
+  for (const trabajador of trabajadores) {
+    const cursor = new Date(inicio);
+    while (cursor <= fin) {
+      await addDoc(collection(db, 'calendario'), {
+        fecha: formatearFecha(cursor), tipo: tipo, trabajadorId: trabajador.dni,
+        nota: notaLimpia, fechaRegistro: registradoEl
+      });
+      cursor.setDate(cursor.getDate() + 1);
+      contador++;
+    }
   }
 
-  return { ok: true, diasAnadidos: contador, fechaInicio: formatearFecha(inicio), fechaFin: formatearFecha(fin), trabajadorNombre: trabajadorNombre };
+  const nombresTrabajadores = trabajadores.map(function (t) { return t.nombre; }).join(', ');
+  return {
+    ok: true, diasAnadidos: contador, fechaInicio: formatearFecha(inicio), fechaFin: formatearFecha(fin),
+    trabajadorNombre: nombresTrabajadores, numTrabajadores: trabajadores.length
+  };
 }
 
 // =====================================================================

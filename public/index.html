@@ -106,6 +106,11 @@
     .justificacion .pregunta { font-size: clamp(13px, 1.7vw, 15px); font-weight: 700; color: var(--naranja-aviso); margin-bottom: 12px; }
     .selector-motivo { text-align: left; margin-top: 6px; }
     .selector-motivo select.campo-texto { margin-bottom: 4px; }
+    .selector-trabajadores-calendario { border: 1px solid #DCEAE7; border-radius: 12px; padding: 8px 10px; margin-bottom: 4px; }
+    .fila-checkbox-trabajador { display: flex; align-items: center; gap: 8px; padding: 5px 2px; font-size: 12.5px; color: var(--texto); cursor: pointer; }
+    .fila-checkbox-trabajador input[type="checkbox"] { width: 16px; height: 16px; flex-shrink: 0; }
+    .fila-checkbox-trabajador.todos { font-weight: 700; border-bottom: 1px solid #EDF3F2; margin-bottom: 4px; padding-bottom: 8px; }
+    .lista-checkbox-trabajadores { max-height: 180px; overflow-y: auto; }
     .fila-justificacion { display: flex; gap: 10px; }
     .btn-justificar { flex: 1; padding: 12px 8px; border: none; border-radius: 10px; font-size: clamp(13px, 1.6vw, 15px); font-weight: 700; cursor: pointer; color: var(--blanco); }
     .btn-si { background: var(--btn-entrada); }
@@ -564,8 +569,16 @@
                 <option value="BajaMedica">Baja médica</option>
               </select>
               <div id="cal-dni-contenedor">
-                <label class="etiqueta-campo">DNI/NIE del trabajador</label>
-                <input type="text" inputmode="numeric" pattern="[0-9]*" maxlength="9" class="campo-texto" id="cal-dni" placeholder="Solo para vacaciones o baja médica">
+                <label class="etiqueta-campo">Trabajador(es)</label>
+                <div class="selector-trabajadores-calendario">
+                  <label class="fila-checkbox-trabajador todos">
+                    <input type="checkbox" id="cal-trabajadores-todos" onchange="alMarcarTodosCalendario()">
+                    <span>Todos los trabajadores activos</span>
+                  </label>
+                  <div id="cal-lista-trabajadores" class="lista-checkbox-trabajadores">
+                    <div class="vacio">Cargando trabajadores…</div>
+                  </div>
+                </div>
               </div>
               <label class="etiqueta-campo">Nota (opcional — nunca escribas datos médicos aquí)</label>
               <input type="text" class="campo-texto" id="cal-nota" placeholder="Nota general, sin datos de salud">
@@ -1676,6 +1689,35 @@
     function actualizarVisibilidadDniCalendario() {
       const tipo = document.getElementById('cal-tipo').value;
       document.getElementById('cal-dni-contenedor').style.display = (tipo === 'Festivo') ? 'none' : 'block';
+      if (tipo !== 'Festivo') cargarListaTrabajadoresCalendario();
+    }
+
+    // Lista de trabajadores con casilla, para marcar uno, varios o todos a
+    // la vez (por ejemplo, un equipo completo de vacaciones el mismo
+    // periodo). Se carga una sola vez y se reutiliza mientras se sigue en
+    // esta pantalla.
+    let __calTrabajadoresCargados = false;
+    function cargarListaTrabajadoresCalendario() {
+      if (__calTrabajadoresCargados) return;
+      __calTrabajadoresCargados = true;
+      const contenedor = document.getElementById('cal-lista-trabajadores');
+      datosFirestore.obtenerListaTrabajadores(db)
+        .then(function (res) {
+          if (!res.ok) { contenedor.innerHTML = '<div class="vacio">' + res.mensaje + '</div>'; return; }
+          const activos = res.trabajadores.filter(function (t) { return t.activo; });
+          if (activos.length === 0) { contenedor.innerHTML = '<div class="vacio">No hay trabajadores activos.</div>'; return; }
+          contenedor.innerHTML = activos.map(function (t) {
+            return '<label class="fila-checkbox-trabajador">' +
+              '<input type="checkbox" class="cal-trabajador-check" value="' + t.dni + '">' +
+              '<span>' + t.nombre + '</span></label>';
+          }).join('');
+        })
+        .catch(function () { contenedor.innerHTML = '<div class="vacio">No se pudo cargar la lista de trabajadores.</div>'; __calTrabajadoresCargados = false; });
+    }
+
+    function alMarcarTodosCalendario() {
+      const todos = document.getElementById('cal-trabajadores-todos').checked;
+      document.querySelectorAll('.cal-trabajador-check').forEach(function (chk) { chk.checked = todos; });
     }
 
     function formatearFechaISO_(d) {
@@ -1714,22 +1756,23 @@
       const fechaInicio = document.getElementById('cal-fecha-inicio').value;
       const fechaFin = document.getElementById('cal-fecha-fin').value;
       const tipo = document.getElementById('cal-tipo').value;
-      const dni = document.getElementById('cal-dni').value.trim();
+      const dnis = Array.from(document.querySelectorAll('.cal-trabajador-check:checked')).map(function (chk) { return chk.value; });
       const nota = document.getElementById('cal-nota').value.trim();
 
       if (!fechaInicio) { mostrarPopup('Falta la fecha', 'Selecciona al menos la fecha de inicio.', 'error'); return; }
-      if (tipo !== 'Festivo' && !dni) { mostrarPopup('Falta el trabajador', 'Indica el DNI/NIE del trabajador para vacaciones o baja médica.', 'error'); return; }
+      if (tipo !== 'Festivo' && dnis.length === 0) { mostrarPopup('Falta el trabajador', 'Marca al menos un trabajador (o "Todos los trabajadores activos") para vacaciones o baja médica.', 'error'); return; }
       mostrarCargando();
 
-      datosFirestore.anadirPeriodoCalendario(db, fechaInicio, fechaFin, tipo, dni, nota)
+      datosFirestore.anadirPeriodoCalendario(db, fechaInicio, fechaFin, tipo, dnis, nota)
         .then(function (res) {
           ocultarCargando();
           if (!res.ok) { mostrarPopup('No se pudo guardar', res.mensaje, 'error'); return; }
           const rango = (res.fechaInicio === res.fechaFin) ? res.fechaInicio : (res.fechaInicio + ' – ' + res.fechaFin);
-          mostrarPopup('Calendario actualizado', tipo + ' guardado para ' + res.trabajadorNombre + '\n' + rango + ' (' + res.diasAnadidos + ' día' + (res.diasAnadidos === 1 ? '' : 's') + ')', 'ok');
+          mostrarPopup('Calendario actualizado', tipo + ' guardado para ' + res.trabajadorNombre + '\n' + rango + ' (' + res.diasAnadidos + ' día' + (res.diasAnadidos === 1 ? '' : 's') + ' en total)', 'ok');
           document.getElementById('cal-fecha-inicio').value = '';
           document.getElementById('cal-fecha-fin').value = '';
-          document.getElementById('cal-dni').value = '';
+          document.getElementById('cal-trabajadores-todos').checked = false;
+          document.querySelectorAll('.cal-trabajador-check').forEach(function (chk) { chk.checked = false; });
           document.getElementById('cal-nota').value = '';
         })
         .catch(function () { ocultarCargando(); mostrarPopup('Error de conexión', 'No se pudo guardar el calendario.', 'error'); });
@@ -1740,6 +1783,7 @@
 
     function cargarListaTrabajadores() {
       const contenedor = document.getElementById('lista-trabajadores');
+      __calTrabajadoresCargados = false; // por si ha cambiado la plantilla, se recarga la próxima vez que se abra el calendario
       datosFirestore.obtenerListaTrabajadores(db)
         .then(function (res) {
           if (!res.ok) { contenedor.innerHTML = '<div class="vacio">' + res.mensaje + '</div>'; return; }
