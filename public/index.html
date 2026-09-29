@@ -271,9 +271,19 @@
     .admin-identificado b { color: var(--verde-oscuro); }
     .btn-logout-admin { background: none; border: none; color: var(--rojo-error); font-size: 12px; font-weight: 700; text-decoration: underline; cursor: pointer; }
 
-    .seccion-admin { display: none; margin-top: 22px; padding-top: 18px; border-top: 2px dashed #E4EFED; text-align: left; }
-    .seccion-admin.activa { display: block; }
-    .seccion-admin .titulo-seccion { font-weight: 800; color: var(--verde-oscuro); font-size: 14px; margin-bottom: 10px; text-align: left; }
+    .titulo-seccion { font-weight: 800; color: var(--verde-oscuro); font-size: 14px; margin-bottom: 10px; text-align: left; }
+
+    /* ---------- PESTAÑAS DE ADMINISTRACIÓN ---------- */
+    .tabs-admin { display: flex; gap: 6px; overflow-x: auto; margin-top: 18px; padding-bottom: 2px; -webkit-overflow-scrolling: touch; scrollbar-width: thin; }
+    .tab-admin-btn {
+      flex: 0 0 auto; display: flex; align-items: center; gap: 6px; border: none; border-radius: 10px 10px 0 0;
+      background: var(--fondo); color: var(--texto); opacity: 0.65; font-size: 12px; font-weight: 700;
+      padding: 9px 13px; cursor: pointer; white-space: nowrap; border-bottom: 3px solid transparent;
+    }
+    .tab-admin-btn.activo { opacity: 1; background: #EAF4F1; color: var(--verde-oscuro); border-bottom: 3px solid var(--verde-oscuro); }
+    .tab-admin-btn .badge-tab { background: var(--rojo-error); color: var(--blanco); font-size: 10px; font-weight: 800; border-radius: 8px; padding: 1px 6px; min-width: 16px; text-align: center; }
+    .panel-admin-tab { display: none; padding-top: 16px; text-align: left; }
+    .panel-admin-tab.activo { display: block; }
 
     /* ---------- GESTIÓN DE TRABAJADORES ---------- */
     .tarjeta-trabajador { background: var(--fondo); border: 2px solid #E4EFED; border-radius: 12px; padding: 10px 14px; margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center; gap: 10px; }
@@ -521,13 +531,22 @@
               <button class="btn-logout-admin" onclick="cerrarSesionAdmin()">Cerrar sesión</button>
             </div>
 
-            <div class="seccion-admin activa">
-              <div class="titulo-seccion">Registros pendientes de corrección</div>
-              <div id="lista-pendientes"><div class="vacio">Cargando…</div></div>
+            <div class="tabs-admin">
+              <button class="tab-admin-btn activo" id="admin-tabbtn-pendientes" onclick="cambiarTabAdmin('pendientes')">🔔 Pendientes <span class="badge-tab" id="badge-pendientes" style="display:none;"></span></button>
+              <button class="tab-admin-btn" id="admin-tabbtn-horarios" onclick="cambiarTabAdmin('horarios')">🕐 Horarios</button>
+              <button class="tab-admin-btn" id="admin-tabbtn-festivos" onclick="cambiarTabAdmin('festivos')">📅 Festivos y cierres</button>
+              <button class="tab-admin-btn" id="admin-tabbtn-bajas" onclick="cambiarTabAdmin('bajas')">🏖️ Vacaciones y bajas</button>
+              <button class="tab-admin-btn" id="admin-tabbtn-trabajadores" onclick="cambiarTabAdmin('trabajadores')">👥 Trabajadores</button>
+              <button class="tab-admin-btn" id="admin-tabbtn-alta" onclick="cambiarTabAdmin('alta')">➕ Alta nueva</button>
+              <button class="tab-admin-btn" id="admin-tabbtn-informes" onclick="cambiarTabAdmin('informes')">📄 Informes</button>
             </div>
 
-            <div class="seccion-admin activa">
-              <div class="titulo-seccion">Buscar registros de un trabajador concreto</div>
+            <!-- PESTAÑA: Pendientes de corrección + búsqueda individual -->
+            <div class="panel-admin-tab activo" id="admin-tab-pendientes">
+              <div class="titulo-seccion">Registros pendientes de corrección</div>
+              <div id="lista-pendientes"><div class="vacio">Cargando…</div></div>
+
+              <div class="titulo-seccion" style="margin-top:24px;padding-top:18px;border-top:2px dashed #E4EFED;">Buscar registros de un trabajador concreto</div>
               <div class="ayuda-pin" style="margin-top:0;margin-bottom:10px;">Solo hace falta si quieres corregir algo que no aparece arriba, en la lista de pendientes.</div>
               <input type="text" inputmode="numeric" pattern="[0-9]*" maxlength="9" class="campo-texto" id="dni-objetivo-admin" placeholder="DNI/NIE del trabajador">
               <div class="selector-mes"><select id="select-mes-admin"></select><select id="select-anio-admin"></select></div>
@@ -548,48 +567,78 @@
               </div>
             </div>
 
-            <div class="seccion-admin activa">
-              <div class="titulo-seccion">Añadir día(s) especial(es) al calendario laboral</div>
+            <!-- PESTAÑA: Horarios (modalidad + horario de cada trabajador) -->
+            <div class="panel-admin-tab" id="admin-tab-horarios">
+              <div class="titulo-seccion">Horarios y modalidad de trabajo</div>
+              <div class="ayuda-pin" style="margin-top:0;margin-bottom:10px;">Elige un trabajador para cambiar su modalidad (presencial / teletrabajo / mixta), sus franjas horarias o su objetivo de horas semanales de teletrabajo.</div>
+              <div id="lista-horarios-trabajadores"><div class="vacio">Cargando…</div></div>
+            </div>
+
+            <!-- PESTAÑA: Festivos y cierres (afecta siempre a todo el equipo) -->
+            <div class="panel-admin-tab" id="admin-tab-festivos">
+              <div class="titulo-seccion">Festivos y cierres (todo el equipo)</div>
+              <div class="ayuda-pin" style="margin-top:0;margin-bottom:10px;">Para un festivo oficial o un cierre por puente — se aplica siempre a todos los trabajadores a la vez, para el rango de fechas que elijas.</div>
 
               <label class="etiqueta-campo">Desde</label>
-              <input type="date" class="campo-texto" id="cal-fecha-inicio">
+              <input type="date" class="campo-texto" id="calf-fecha-inicio">
               <label class="etiqueta-campo">Hasta (déjalo vacío para un solo día)</label>
-              <input type="date" class="campo-texto" id="cal-fecha-fin">
-
+              <input type="date" class="campo-texto" id="calf-fecha-fin">
               <div class="fila-atajos-calendario">
-                <button type="button" class="btn-atajo-calendario" onclick="seleccionarSemana()">📅 Toda la semana</button>
-                <button type="button" class="btn-atajo-calendario" onclick="seleccionarMes()">🗓️ Todo el mes</button>
+                <button type="button" class="btn-atajo-calendario" onclick="seleccionarSemana('calf')">📅 Toda la semana</button>
+                <button type="button" class="btn-atajo-calendario" onclick="seleccionarMes('calf')">🗓️ Todo el mes</button>
               </div>
-              <div class="ayuda-pin" style="margin-top:6px;">Al pulsar sobre los campos de fecha se abre el calendario del navegador — puedes elegir el día directamente con el ratón, o usar los atajos de arriba para marcar la semana o el mes completo de la fecha de inicio.</div>
+              <div class="ayuda-pin" style="margin-top:6px;">Al pulsar sobre los campos de fecha se abre el calendario del navegador — puedes elegir el día directamente, o usar los atajos de arriba para marcar la semana o el mes completo de la fecha de inicio (por ejemplo, para un puente).</div>
+
+              <label class="etiqueta-campo">Nota (opcional)</label>
+              <input type="text" class="campo-texto" id="calf-nota" placeholder="Ej: Puente de diciembre, Festivo local...">
+              <button class="btn btn-consultar" onclick="guardarFestivo()">Guardar festivo/cierre</button>
+            </div>
+
+            <!-- PESTAÑA: Vacaciones y bajas (individual, uno/varios/todos) -->
+            <div class="panel-admin-tab" id="admin-tab-bajas">
+              <div class="titulo-seccion">Vacaciones y bajas médicas</div>
+              <div class="ayuda-pin" style="margin-top:0;margin-bottom:10px;">Para las vacaciones o la baja médica de uno o varios trabajadores concretos (o de todos a la vez, si coinciden en las mismas fechas).</div>
+
+              <label class="etiqueta-campo">Desde</label>
+              <input type="date" class="campo-texto" id="calb-fecha-inicio">
+              <label class="etiqueta-campo">Hasta (déjalo vacío para un solo día)</label>
+              <input type="date" class="campo-texto" id="calb-fecha-fin">
+              <div class="fila-atajos-calendario">
+                <button type="button" class="btn-atajo-calendario" onclick="seleccionarSemana('calb')">📅 Toda la semana</button>
+                <button type="button" class="btn-atajo-calendario" onclick="seleccionarMes('calb')">🗓️ Todo el mes</button>
+              </div>
 
               <label class="etiqueta-campo">Tipo</label>
-              <select class="campo-texto" id="cal-tipo" onchange="actualizarVisibilidadDniCalendario()">
-                <option value="Festivo">Festivo (afecta a todo el equipo)</option>
+              <select class="campo-texto" id="calb-tipo">
                 <option value="Vacaciones">Vacaciones</option>
                 <option value="BajaMedica">Baja médica</option>
               </select>
-              <div id="cal-dni-contenedor">
-                <label class="etiqueta-campo">Trabajador(es)</label>
-                <div class="selector-trabajadores-calendario">
-                  <label class="fila-checkbox-trabajador todos">
-                    <input type="checkbox" id="cal-trabajadores-todos" onchange="alMarcarTodosCalendario()">
-                    <span>Todos los trabajadores activos</span>
-                  </label>
-                  <div id="cal-lista-trabajadores" class="lista-checkbox-trabajadores">
-                    <div class="vacio">Cargando trabajadores…</div>
-                  </div>
+
+              <label class="etiqueta-campo">Trabajador(es)</label>
+              <div class="selector-trabajadores-calendario">
+                <label class="fila-checkbox-trabajador todos">
+                  <input type="checkbox" id="calb-trabajadores-todos" onchange="alMarcarTodosBajas()">
+                  <span>Todos los trabajadores activos</span>
+                </label>
+                <div id="calb-lista-trabajadores" class="lista-checkbox-trabajadores">
+                  <div class="vacio">Cargando trabajadores…</div>
                 </div>
               </div>
+
               <label class="etiqueta-campo">Nota (opcional — nunca escribas datos médicos aquí)</label>
-              <input type="text" class="campo-texto" id="cal-nota" placeholder="Nota general, sin datos de salud">
-              <button class="btn btn-consultar" onclick="guardarDiaCalendario()">Guardar en el calendario</button>
+              <input type="text" class="campo-texto" id="calb-nota" placeholder="Nota general, sin datos de salud">
+              <button class="btn btn-consultar" onclick="guardarBajaVacaciones()">Guardar vacaciones/baja</button>
             </div>
 
-            <div class="seccion-admin activa">
-              <div class="titulo-seccion">Gestión de trabajadores (alta / baja)</div>
+            <!-- PESTAÑA: Trabajadores (listado, baja/reactivar, editar datos, invitar) -->
+            <div class="panel-admin-tab" id="admin-tab-trabajadores">
+              <div class="titulo-seccion">Plantilla de trabajadores</div>
               <div id="lista-trabajadores"><div class="vacio">Cargando…</div></div>
+            </div>
 
-              <div class="titulo-form" style="margin-top:16px;">Añadir nuevo trabajador</div>
+            <!-- PESTAÑA: Alta de un trabajador nuevo -->
+            <div class="panel-admin-tab" id="admin-tab-alta">
+              <div class="titulo-seccion">Dar de alta a un trabajador nuevo</div>
               <label class="etiqueta-campo">Apellidos</label>
               <input type="text" class="campo-texto" id="nt-apellidos" placeholder="Ej: CABRERA GARCÍA">
               <label class="etiqueta-campo">Nombre</label>
@@ -614,13 +663,14 @@
                 <input type="number" step="0.5" min="0" class="campo-texto" id="nt-horasSemanalesTeletrabajo" placeholder="Ej. 37,5">
               </div>
 
-              <div class="ayuda-pin" style="margin-top:10px;">Horario semanal (opcional aquí — también se puede añadir después). Deja vacíos los días que no trabaje.</div>
+              <div class="ayuda-pin" style="margin-top:10px;">Horario semanal (opcional aquí — también se puede añadir después, desde la pestaña "Horarios"). Deja vacíos los días que no trabaje.</div>
               <div id="horario-nuevo-trabajador"></div>
 
               <button class="btn btn-consultar" onclick="crearTrabajador()">Dar de alta</button>
             </div>
 
-            <div class="seccion-admin activa">
+            <!-- PESTAÑA: Informes -->
+            <div class="panel-admin-tab" id="admin-tab-informes">
               <div class="titulo-seccion">Generar informes</div>
               <label class="etiqueta-campo">DNI/NIE del trabajador</label>
               <input type="text" inputmode="numeric" pattern="[0-9]*" maxlength="9" class="campo-texto" id="inf-dni" placeholder="DNI/NIE del trabajador">
@@ -1379,15 +1429,16 @@
           document.getElementById('admin-nombre-actual').textContent = res.nombre;
           document.getElementById('admin-login').style.display = 'none';
           document.getElementById('admin-contenido').style.display = 'block';
+          cambiarTabAdmin('pendientes'); // siempre empieza en "Pendientes", la pestaña que más falta hace revisar
           // cargarPendientes() se dispara SOLO al cerrarse este popup (como
           // callback), nunca antes — así nunca vuelve a activarse el reloj
           // de arena mientras el popup todavía está en pantalla o esperando
-          // a mostrarse.
+          // a mostrarse. Las demás pestañas cargan sus propios datos solo
+          // al abrirlas (ver cambiarTabAdmin), no hace falta cargarlas aquí.
           mostrarPopup('Bienvenido/a', 'Identificado como ' + res.nombre + '.', 'ok', function () {
             // Sin servidor, esto es lo que hace de "comprobación diaria de
             // ausencias" — se ejecuta cada vez que un administrador entra.
             datosFirestore.comprobarAusenciasDeHoy(db).then(cargarPendientes).catch(cargarPendientes);
-            cargarListaTrabajadores();
           });
         })
         .catch(function () { ocultarCargando(); mostrarPopup('Error de conexión', 'No se pudo verificar el acceso.', 'error'); });
@@ -1423,6 +1474,11 @@
           if (!res.ok) { mostrarPopup('No se pudo cargar', res.mensaje, 'error'); contenedor.innerHTML = ''; return; }
           pendientesActuales = res.pendientes;
           renderizarPendientes();
+          const badge = document.getElementById('badge-pendientes');
+          if (badge) {
+            if (pendientesActuales.length > 0) { badge.textContent = pendientesActuales.length; badge.style.display = 'inline-block'; }
+            else { badge.style.display = 'none'; }
+          }
         })
         .catch(function () {
           ocultarCargando();
@@ -1686,38 +1742,20 @@
     }
 
     // ---------- ADMINISTRACIÓN: calendario laboral (día suelto o periodo) ----------
-    function actualizarVisibilidadDniCalendario() {
-      const tipo = document.getElementById('cal-tipo').value;
-      document.getElementById('cal-dni-contenedor').style.display = (tipo === 'Festivo') ? 'none' : 'block';
-      if (tipo !== 'Festivo') cargarListaTrabajadoresCalendario();
-    }
-
-    // Lista de trabajadores con casilla, para marcar uno, varios o todos a
-    // la vez (por ejemplo, un equipo completo de vacaciones el mismo
-    // periodo). Se carga una sola vez y se reutiliza mientras se sigue en
-    // esta pantalla.
-    let __calTrabajadoresCargados = false;
-    function cargarListaTrabajadoresCalendario() {
-      if (__calTrabajadoresCargados) return;
-      __calTrabajadoresCargados = true;
-      const contenedor = document.getElementById('cal-lista-trabajadores');
-      datosFirestore.obtenerListaTrabajadores(db)
-        .then(function (res) {
-          if (!res.ok) { contenedor.innerHTML = '<div class="vacio">' + res.mensaje + '</div>'; return; }
-          const activos = res.trabajadores.filter(function (t) { return t.activo; });
-          if (activos.length === 0) { contenedor.innerHTML = '<div class="vacio">No hay trabajadores activos.</div>'; return; }
-          contenedor.innerHTML = activos.map(function (t) {
-            return '<label class="fila-checkbox-trabajador">' +
-              '<input type="checkbox" class="cal-trabajador-check" value="' + t.dni + '">' +
-              '<span>' + t.nombre + '</span></label>';
-          }).join('');
-        })
-        .catch(function () { contenedor.innerHTML = '<div class="vacio">No se pudo cargar la lista de trabajadores.</div>'; __calTrabajadoresCargados = false; });
-    }
-
-    function alMarcarTodosCalendario() {
-      const todos = document.getElementById('cal-trabajadores-todos').checked;
-      document.querySelectorAll('.cal-trabajador-check').forEach(function (chk) { chk.checked = todos; });
+    // ---------- ADMINISTRACIÓN: pestañas ----------
+    // Cada pestaña carga sus propios datos SOLO la primera vez que se abre
+    // (o, para "trabajadores"/"horarios"/"bajas", cada vez que se abre, ya
+    // que son listas que pueden cambiar entre visitas), en vez de cargarlo
+    // todo de golpe al iniciar sesión.
+    const TABS_ADMIN = ['pendientes', 'horarios', 'festivos', 'bajas', 'trabajadores', 'alta', 'informes'];
+    function cambiarTabAdmin(nombre) {
+      TABS_ADMIN.forEach(function (t) {
+        document.getElementById('admin-tab-' + t).classList.toggle('activo', t === nombre);
+        document.getElementById('admin-tabbtn-' + t).classList.toggle('activo', t === nombre);
+      });
+      if (nombre === 'horarios') cargarListaTrabajadoresHorarios();
+      if (nombre === 'bajas') cargarListaTrabajadoresBajas();
+      if (nombre === 'trabajadores') cargarListaTrabajadores();
     }
 
     function formatearFechaISO_(d) {
@@ -1733,34 +1771,80 @@
       return new Date(partes[0], partes[1] - 1, partes[2]);
     }
 
-    function seleccionarSemana() {
-      const inicioVal = document.getElementById('cal-fecha-inicio').value;
+    // prefijo: 'calf' (festivos) o 'calb' (vacaciones/bajas) — cada pestaña
+    // tiene sus propios campos de fecha, reutilizando la misma lógica.
+    function seleccionarSemana(prefijo) {
+      const inicioVal = document.getElementById(prefijo + '-fecha-inicio').value;
       if (!inicioVal) { mostrarPopup('Falta la fecha de inicio', 'Elige primero el día de inicio de la semana.', 'error'); return; }
       const inicio = parsearFechaISOLocal_(inicioVal);
       const fin = new Date(inicio);
       fin.setDate(inicio.getDate() + 6);
-      document.getElementById('cal-fecha-fin').value = formatearFechaISO_(fin);
+      document.getElementById(prefijo + '-fecha-fin').value = formatearFechaISO_(fin);
     }
 
-    function seleccionarMes() {
-      const inicioVal = document.getElementById('cal-fecha-inicio').value;
+    function seleccionarMes(prefijo) {
+      const inicioVal = document.getElementById(prefijo + '-fecha-inicio').value;
       if (!inicioVal) { mostrarPopup('Falta la fecha de inicio', 'Elige primero cualquier día del mes que quieres marcar entero.', 'error'); return; }
       const ref = parsearFechaISOLocal_(inicioVal);
       const primerDia = new Date(ref.getFullYear(), ref.getMonth(), 1);
       const ultimoDia = new Date(ref.getFullYear(), ref.getMonth() + 1, 0);
-      document.getElementById('cal-fecha-inicio').value = formatearFechaISO_(primerDia);
-      document.getElementById('cal-fecha-fin').value = formatearFechaISO_(ultimoDia);
+      document.getElementById(prefijo + '-fecha-inicio').value = formatearFechaISO_(primerDia);
+      document.getElementById(prefijo + '-fecha-fin').value = formatearFechaISO_(ultimoDia);
     }
 
-    function guardarDiaCalendario() {
-      const fechaInicio = document.getElementById('cal-fecha-inicio').value;
-      const fechaFin = document.getElementById('cal-fecha-fin').value;
-      const tipo = document.getElementById('cal-tipo').value;
-      const dnis = Array.from(document.querySelectorAll('.cal-trabajador-check:checked')).map(function (chk) { return chk.value; });
-      const nota = document.getElementById('cal-nota').value.trim();
+    // ---------- PESTAÑA "Festivos y cierres" (todo el equipo) ----------
+    function guardarFestivo() {
+      const fechaInicio = document.getElementById('calf-fecha-inicio').value;
+      const fechaFin = document.getElementById('calf-fecha-fin').value;
+      const nota = document.getElementById('calf-nota').value.trim();
 
       if (!fechaInicio) { mostrarPopup('Falta la fecha', 'Selecciona al menos la fecha de inicio.', 'error'); return; }
-      if (tipo !== 'Festivo' && dnis.length === 0) { mostrarPopup('Falta el trabajador', 'Marca al menos un trabajador (o "Todos los trabajadores activos") para vacaciones o baja médica.', 'error'); return; }
+      mostrarCargando();
+
+      datosFirestore.anadirPeriodoCalendario(db, fechaInicio, fechaFin, 'Festivo', [], nota)
+        .then(function (res) {
+          ocultarCargando();
+          if (!res.ok) { mostrarPopup('No se pudo guardar', res.mensaje, 'error'); return; }
+          const rango = (res.fechaInicio === res.fechaFin) ? res.fechaInicio : (res.fechaInicio + ' – ' + res.fechaFin);
+          mostrarPopup('Calendario actualizado', 'Festivo/cierre guardado para todo el equipo\n' + rango + ' (' + res.diasAnadidos + ' día' + (res.diasAnadidos === 1 ? '' : 's') + ')', 'ok');
+          document.getElementById('calf-fecha-inicio').value = '';
+          document.getElementById('calf-fecha-fin').value = '';
+          document.getElementById('calf-nota').value = '';
+        })
+        .catch(function () { ocultarCargando(); mostrarPopup('Error de conexión', 'No se pudo guardar el calendario.', 'error'); });
+    }
+
+    // ---------- PESTAÑA "Vacaciones y bajas" (uno, varios o todos) ----------
+    function cargarListaTrabajadoresBajas() {
+      const contenedor = document.getElementById('calb-lista-trabajadores');
+      datosFirestore.obtenerListaTrabajadores(db)
+        .then(function (res) {
+          if (!res.ok) { contenedor.innerHTML = '<div class="vacio">' + res.mensaje + '</div>'; return; }
+          const activos = res.trabajadores.filter(function (t) { return t.activo; });
+          if (activos.length === 0) { contenedor.innerHTML = '<div class="vacio">No hay trabajadores activos.</div>'; return; }
+          contenedor.innerHTML = activos.map(function (t) {
+            return '<label class="fila-checkbox-trabajador">' +
+              '<input type="checkbox" class="calb-trabajador-check" value="' + t.dni + '">' +
+              '<span>' + t.nombre + '</span></label>';
+          }).join('');
+        })
+        .catch(function () { contenedor.innerHTML = '<div class="vacio">No se pudo cargar la lista de trabajadores.</div>'; });
+    }
+
+    function alMarcarTodosBajas() {
+      const todos = document.getElementById('calb-trabajadores-todos').checked;
+      document.querySelectorAll('.calb-trabajador-check').forEach(function (chk) { chk.checked = todos; });
+    }
+
+    function guardarBajaVacaciones() {
+      const fechaInicio = document.getElementById('calb-fecha-inicio').value;
+      const fechaFin = document.getElementById('calb-fecha-fin').value;
+      const tipo = document.getElementById('calb-tipo').value;
+      const dnis = Array.from(document.querySelectorAll('.calb-trabajador-check:checked')).map(function (chk) { return chk.value; });
+      const nota = document.getElementById('calb-nota').value.trim();
+
+      if (!fechaInicio) { mostrarPopup('Falta la fecha', 'Selecciona al menos la fecha de inicio.', 'error'); return; }
+      if (dnis.length === 0) { mostrarPopup('Falta el trabajador', 'Marca al menos un trabajador (o "Todos los trabajadores activos").', 'error'); return; }
       mostrarCargando();
 
       datosFirestore.anadirPeriodoCalendario(db, fechaInicio, fechaFin, tipo, dnis, nota)
@@ -1769,13 +1853,38 @@
           if (!res.ok) { mostrarPopup('No se pudo guardar', res.mensaje, 'error'); return; }
           const rango = (res.fechaInicio === res.fechaFin) ? res.fechaInicio : (res.fechaInicio + ' – ' + res.fechaFin);
           mostrarPopup('Calendario actualizado', tipo + ' guardado para ' + res.trabajadorNombre + '\n' + rango + ' (' + res.diasAnadidos + ' día' + (res.diasAnadidos === 1 ? '' : 's') + ' en total)', 'ok');
-          document.getElementById('cal-fecha-inicio').value = '';
-          document.getElementById('cal-fecha-fin').value = '';
-          document.getElementById('cal-trabajadores-todos').checked = false;
-          document.querySelectorAll('.cal-trabajador-check').forEach(function (chk) { chk.checked = false; });
-          document.getElementById('cal-nota').value = '';
+          document.getElementById('calb-fecha-inicio').value = '';
+          document.getElementById('calb-fecha-fin').value = '';
+          document.getElementById('calb-trabajadores-todos').checked = false;
+          document.querySelectorAll('.calb-trabajador-check').forEach(function (chk) { chk.checked = false; });
+          document.getElementById('calb-nota').value = '';
         })
         .catch(function () { ocultarCargando(); mostrarPopup('Error de conexión', 'No se pudo guardar el calendario.', 'error'); });
+    }
+
+    // ---------- PESTAÑA "Horarios" ----------
+    const ETIQUETAS_PERFIL_TRABAJO = { presencial: '100% presencial', teletrabajo: '100% teletrabajo', mixta: 'Mixta' };
+    function cargarListaTrabajadoresHorarios() {
+      const contenedor = document.getElementById('lista-horarios-trabajadores');
+      datosFirestore.obtenerListaTrabajadores(db)
+        .then(function (res) {
+          if (!res.ok) { contenedor.innerHTML = '<div class="vacio">' + res.mensaje + '</div>'; return; }
+          const activos = res.trabajadores.filter(function (t) { return t.activo; });
+          if (activos.length === 0) { contenedor.innerHTML = '<div class="vacio">No hay trabajadores activos.</div>'; return; }
+          contenedor.innerHTML = activos.map(function (t) {
+            const perfil = t.perfilTrabajo || 'presencial';
+            return '<div class="tarjeta-trabajador">' +
+              '<div class="datos-trabajador-lista"><span class="nombre-tl">' + t.nombre + '</span>' +
+              '<span class="detalle-tl">DNI: ' + t.dni + (t.categoria ? ' · ' + t.categoria : '') + '</span>' +
+              '<span class="etiqueta-perfil-trabajo ' + perfil + '">' + ETIQUETAS_PERFIL_TRABAJO[perfil] + '</span></div>' +
+              '<button class="btn-cambiar-estado" style="background:#F1EEFB;color:#5B3FA0;" data-dni="' + t.dni + '" data-editar-horario="1">Editar horario</button>' +
+              '</div>';
+          }).join('');
+          contenedor.querySelectorAll('[data-editar-horario]').forEach(function (btn) {
+            btn.addEventListener('click', function () { abrirEdicionHorario(btn.getAttribute('data-dni')); });
+          });
+        })
+        .catch(function () { contenedor.innerHTML = '<div class="vacio">No se pudo cargar la lista de trabajadores.</div>'; });
     }
 
     // ---------- ADMINISTRACIÓN: gestión de trabajadores (alta / baja / reactivar) ----------
@@ -1783,7 +1892,6 @@
 
     function cargarListaTrabajadores() {
       const contenedor = document.getElementById('lista-trabajadores');
-      __calTrabajadoresCargados = false; // por si ha cambiado la plantilla, se recarga la próxima vez que se abra el calendario
       datosFirestore.obtenerListaTrabajadores(db)
         .then(function (res) {
           if (!res.ok) { contenedor.innerHTML = '<div class="vacio">' + res.mensaje + '</div>'; return; }
@@ -2238,7 +2346,6 @@
     rellenarSelectoresMesAnio('select-mes-admin', 'select-anio-admin');
     rellenarSelectMotivos('motivo-no-justificada');
     rellenarSelectMotivos('correccion-admin-motivo');
-    actualizarVisibilidadDniCalendario();
   </script>
 </body>
 </html>
