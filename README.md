@@ -375,13 +375,38 @@ Si todo esto funciona, ¡ya está desplegado y en marcha!
   prevista de la franja más cercana ese día, con un margen de **10
   minutos, antes y después**. Fuera de ese margen, se pide
   obligatoriamente un motivo.
-- **Modalidad de trabajo**: en "100% teletrabajo" el trabajador tiene
-  libertad horaria — sus fichajes nunca se comparan con ningún horario, así
-  que nunca salen avisos de retraso o salida anticipada. En "mixta" se
-  marca, día a día, si ese día es presencial (sí se compara con el
-  horario) o teletrabajo/mixto (libertad horaria ese día). La modalidad y
-  el horario de un trabajador se pueden cambiar cuando haga falta con el
-  botón **"Editar horario"** de su tarjeta, en "Gestión de trabajadores".
+- **Modalidad de trabajo**: hay tres modalidades, elegibles y editables en
+  cualquier momento desde Administración → "Gestión de trabajadores" →
+  botón **"Editar horario"** de su tarjeta:
+  - **100% presencial**: su horario (con sus franjas) se compara siempre
+    con la hora real de fichaje, con el margen de 10 minutos de siempre.
+  - **100% teletrabajo**: libertad horaria total — ficha libremente
+    (entrada/salida), sin comparar nunca con ningún horario, así que no
+    salen avisos de retraso o salida anticipada. En su lugar, se le fija
+    un **objetivo de horas semanales** (ver más abajo).
+  - **Mixta**: se configura **día a día** si ese día es "Presencial" o
+    "Teletrabajo (sin fichar)" con un desplegable junto a cada día de la
+    semana:
+    - Los días marcados **Presencial** funcionan exactamente igual que un
+      trabajador 100% presencial: se define su horario con franjas
+      (botón "+ Añadir franja") y se compara con el fichaje real.
+    - Los días marcados **Teletrabajo** funcionan exactamente igual que un
+      100% teletrabajo ESE día: se ficha libremente, sin comparar con
+      ningún horario, y esas horas cuentan para el objetivo semanal de
+      teletrabajo de más abajo (los días presenciales no cuentan para
+      ese objetivo, van aparte con su propio horario).
+- **Objetivo de horas semanales de teletrabajo** (100% teletrabajo, y la
+  parte de teletrabajo de un "mixta"): al elegir esa modalidad aparece un
+  campo **"Horas semanales de teletrabajo"** (por ejemplo, 37,5h). Cada
+  semana empieza con ese objetivo completo y va bajando según el
+  trabajador ficha libremente sus horas — en "Mis registros" ve siempre
+  cuántas horas le quedan pendientes esa semana. Si esa semana hay un
+  festivo, unas vacaciones o una baja médica del propio trabajador, el
+  objetivo de esa semana se reduce proporcionalmente (el objetivo dividido
+  entre 5 por cada día así). Si al terminar una semana no se completó el
+  objetivo (o se hizo de más), la diferencia se traslada a la semana
+  siguiente, pero **solo dentro del mismo mes**: cada mes nuevo siempre
+  empieza con el objetivo completo, sin arrastrar nada del mes anterior.
 - **Invitarlo**: pulsa **"Enviar invitación"** junto a su nombre, cuando
   tú decidas (nunca se manda sola). Le llegará un correo para que elija
   su código de 6 dígitos.
