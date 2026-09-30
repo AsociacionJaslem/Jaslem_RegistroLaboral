@@ -368,6 +368,9 @@
       <div class="popup-card" style="max-width:420px;">
         <div class="popup-cuerpo" style="padding-top:22px;text-align:left;">
           <div class="popup-titulo" id="acceso-trabajador-titulo" style="text-align:center;">Establece tu código de acceso</div>
+          <div id="acceso-trabajador-intro" style="display:none;background:#F0F7F4;border-radius:10px;padding:10px 12px;margin-bottom:12px;font-size:13px;color:#245c4c;line-height:1.5;text-align:left;">
+            <b>JÁSLEM</b> es la aplicación con la que registras cada día tu hora de entrada y de salida (tu jornada laboral), tal y como exige la ley. Al entrar podrás fichar, consultar tus registros del mes y, si algún día fichas fuera de tu horario habitual, indicar el motivo. Este enlace es de un solo uso y sirve únicamente para que crees tu código de acceso personal.
+          </div>
           <div class="popup-mensaje" id="acceso-trabajador-explicacion" style="text-align:center;margin-bottom:14px;">
             Elige un código de 6 dígitos. Solo tú lo sabrás: ni el administrador ni nadie más podrá verlo. Lo usarás para fichar y para ver tus registros.
           </div>
@@ -924,6 +927,7 @@
         modoAccesoTrabajador = 'invitacion';
         const emailGuardado = window.localStorage.getItem('jaslem_email_invitacion') || '';
         document.getElementById('acceso-trabajador-titulo').textContent = 'Bienvenido — establece tu código de acceso';
+        document.getElementById('acceso-trabajador-intro').style.display = 'block';
         document.getElementById('acceso-trabajador-explicacion').textContent =
           'Es tu primera vez. Elige un código de 6 dígitos: solo tú lo sabrás, ni el administrador podrá verlo. Lo usarás para fichar y ver tus registros.';
         document.getElementById('acceso-trabajador-email').value = emailGuardado;

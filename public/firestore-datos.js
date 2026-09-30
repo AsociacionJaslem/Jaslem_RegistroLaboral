@@ -425,6 +425,7 @@ export async function enviarInvitacionTrabajador(auth, db, dni) {
   const privSnap = await getDoc(doc(db, 'trabajadores_privado', dni));
   if (!privSnap.exists() || !privSnap.data().email) return { ok: false, mensaje: 'Este trabajador no tiene un email guardado.' };
   const email = privSnap.data().email;
+  auth.languageCode = 'es'; // El correo que envía Firebase debe salir en español
   await sendSignInLinkToEmail(auth, email, enlaceInvitacion());
   window.localStorage.setItem('jaslem_email_invitacion', email);
   return { ok: true, email: email };
