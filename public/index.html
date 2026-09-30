@@ -685,18 +685,10 @@
               <select class="campo-texto" id="inf-dni">
                 <option value="">Cargando trabajadores…</option>
               </select>
-              <label class="etiqueta-campo">Tipo de periodo</label>
-              <select class="campo-texto" id="inf-tipo-periodo">
-                <option value="diario">Diario</option>
-                <option value="semanal">Semanal</option>
-                <option value="mensual" selected>Mensual</option>
-                <option value="trimestral">Trimestral</option>
-                <option value="semestral">Semestral</option>
-                <option value="anual">Anual</option>
-                <option value="historico_completo">Histórico completo (todo el periodo trabajado)</option>
-              </select>
-              <label class="etiqueta-campo" id="inf-etiqueta-fecha">Fecha de referencia (cualquier día dentro del periodo)</label>
-              <input type="date" class="campo-texto" id="inf-fecha-referencia">
+              <label class="etiqueta-campo">Mes</label>
+              <select class="campo-texto" id="inf-mes"></select>
+              <label class="etiqueta-campo">Año</label>
+              <select class="campo-texto" id="inf-anio"></select>
               <label class="etiqueta-campo">Formato</label>
               <select class="campo-texto" id="inf-formato">
                 <option value="pdf">PDF</option>
@@ -2462,36 +2454,29 @@
     }
 
     document.addEventListener('DOMContentLoaded', function () {
-      const selectTipoPeriodo = document.getElementById('inf-tipo-periodo');
-      const fechaReferenciaEl = document.getElementById('inf-fecha-referencia');
-      const etiquetaFechaEl = document.getElementById('inf-etiqueta-fecha');
-      if (selectTipoPeriodo) {
-        selectTipoPeriodo.addEventListener('change', function () {
-          const esHistorico = selectTipoPeriodo.value === 'historico_completo';
-          fechaReferenciaEl.style.display = esHistorico ? 'none' : 'block';
-          etiquetaFechaEl.style.display = esHistorico ? 'none' : 'block';
-        });
-      }
       construirFormularioHorarioNuevo();
       detectarEnlaceAccesoTrabajador();
     });
 
     function generarInformeDesdeFormulario() {
       const dni = document.getElementById('inf-dni').value.trim();
-      const tipoPeriodo = document.getElementById('inf-tipo-periodo').value;
-      const fechaReferencia = document.getElementById('inf-fecha-referencia').value;
+      const mes = document.getElementById('inf-mes').value;
+      const anio = document.getElementById('inf-anio').value;
       const formato = document.getElementById('inf-formato').value;
       const proteger = document.getElementById('inf-proteger').checked;
       const password = document.getElementById('inf-password').value;
 
       if (!dni) { mostrarPopup('Falta el trabajador', 'Selecciona de la lista el trabajador del que quieres el informe.', 'error'); return; }
-      if (tipoPeriodo !== 'historico_completo' && !fechaReferencia) {
-        mostrarPopup('Falta la fecha', 'Elige una fecha cualquiera dentro del periodo que quieres informar.', 'error'); return;
-      }
+      if (!mes || !anio) { mostrarPopup('Falta el mes', 'Elige el mes y el año del informe.', 'error'); return; }
+
+      // El informe siempre es mensual: basta con un día cualquiera dentro
+      // del mes elegido (el día 1) para que calcularPeriodo() calcule el
+      // rango completo de ese mes.
+      const fechaReferencia = anio + '-' + String(mes).padStart(2, '0') + '-01';
 
       mostrarCargando();
       const logoBase64 = (document.querySelector('.logo') || {}).src || '';
-      generarInformeCliente(db, auth, logoBase64, dni, tipoPeriodo, fechaReferencia, formato, { proteger: proteger, password: password })
+      generarInformeCliente(db, auth, logoBase64, dni, 'mensual', fechaReferencia, formato, { proteger: proteger, password: password })
         .then(function (res) {
           ocultarCargando();
           if (!res.ok) { mostrarPopup('No se pudo generar', res.mensaje, 'error'); return; }
@@ -2531,6 +2516,7 @@
 
     rellenarSelectoresMesAnio('select-mes', 'select-anio');
     rellenarSelectoresMesAnio('select-mes-admin', 'select-anio-admin');
+    rellenarSelectoresMesAnio('inf-mes', 'inf-anio');
     rellenarSelectMotivos('motivo-no-justificada');
     rellenarSelectMotivos('correccion-admin-motivo');
     rellenarSelectTipoCalendarioPropio('calb-tipo');

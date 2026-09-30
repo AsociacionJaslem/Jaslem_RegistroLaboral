@@ -93,8 +93,12 @@ function cadenaCorreccionesDe(r, correcciones) {
 }
 
 function textoCorreccion(c) {
-  return (c.fechaSolicitud || '') + ' — ' + c.rolSolicitante + ' (' + c.solicitanteNombre + '): ' + c.motivo +
-    (c.valorRectificado ? ' → fijado en ' + c.valorRectificado.hora + ' (' + c.valorRectificado.fecha + ')' : ' (pendiente de respuesta)');
+  // Nota: se evitan símbolos como "↳" o "→", que no existen en la
+  // codificación de las fuentes estándar de jsPDF (Helvetica) y podían
+  // desajustar el cálculo del ancho del texto, provocando que la fila se
+  // saliera de la página en vez de partirse en varias líneas.
+  return (c.fechaSolicitud || '') + ' - ' + c.rolSolicitante + ' (' + c.solicitanteNombre + '): ' + c.motivo +
+    (c.valorRectificado ? ' >> fijado en ' + c.valorRectificado.hora + ' (' + c.valorRectificado.fecha + ')' : ' (pendiente de respuesta)');
 }
 
 function formatearRangoAusencia_(r) {
@@ -204,8 +208,12 @@ function generarPdf(logoBase64, trabajador, periodo, datos, certificacion) {
     const estado = estadoDeRegistro(r, datos.correcciones);
     filas.push([r.fecha, r.hora, r.tipo, estado.etiqueta, (r.advertencia || '').replace('ADVERTENCIA: ', '')]);
     cadenaCorreccionesDe(r, datos.correcciones).forEach(function (c) {
-      filas.push(['', '', '', '', '↳ ' + textoCorreccion(c)]);
-      filasCorreccion[filas.length - 1] = true;
+      filas.push(['', '', '', '', '» ' + textoCorreccion(c)]);
+      // Mismo color que la leyenda: una solicitud del trabajador todavía sin
+      // resolver (valorRectificado null) es "Solicitada" (violeta); una ya
+      // resuelta por el administrador (tenga o no valorRectificado fijado
+      // en este paso concreto) es "Corregido" (marrón/naranja).
+      filasCorreccion[filas.length - 1] = c.valorRectificado ? COLORES_ESTADO['Corregido'] : COLORES_ESTADO['Solicitada'];
     });
   });
 
@@ -213,13 +221,22 @@ function generarPdf(logoBase64, trabajador, periodo, datos, certificacion) {
     startY: 180,
     head: [['Fecha', 'Hora', 'Tipo', 'Estado', 'Detalle']],
     body: filas.length ? filas : [['—', '—', '—', 'Sin fichajes en este periodo', '']],
+    margin: { left: 40, right: 40 },
+    tableWidth: 515,
     headStyles: { fillColor: COLOR_VERDE_OSCURO, textColor: [255, 255, 255], fontSize: 9 },
-    styles: { fontSize: 8.5, textColor: COLOR_TEXTO },
+    styles: { fontSize: 8.5, textColor: COLOR_TEXTO, overflow: 'linebreak', cellWidth: 'wrap' },
+    columnStyles: {
+      0: { cellWidth: 62 },
+      1: { cellWidth: 52 },
+      2: { cellWidth: 65 },
+      3: { cellWidth: 68 },
+      4: { cellWidth: 268 }
+    },
     didParseCell: function (data) {
       if (data.section !== 'body') return;
       if (filasCorreccion[data.row.index]) {
         data.cell.styles.fontStyle = 'italic';
-        data.cell.styles.textColor = [185, 119, 14];
+        data.cell.styles.textColor = filasCorreccion[data.row.index];
         data.cell.styles.fontSize = 8;
         return;
       }
@@ -277,8 +294,16 @@ function generarPdf(logoBase64, trabajador, periodo, datos, certificacion) {
       startY: y2,
       head: [['Tipo', 'Periodo', 'Días', 'Nota']],
       body: filasAusencias,
+      margin: { left: 40, right: 40 },
+      tableWidth: 515,
       headStyles: { fillColor: COLOR_VERDE_OSCURO, textColor: [255, 255, 255], fontSize: 9 },
-      styles: { fontSize: 8.5, textColor: COLOR_TEXTO }
+      styles: { fontSize: 8.5, textColor: COLOR_TEXTO, overflow: 'linebreak', cellWidth: 'wrap' },
+      columnStyles: {
+        0: { cellWidth: 140 },
+        1: { cellWidth: 140 },
+        2: { cellWidth: 45 },
+        3: { cellWidth: 190 }
+      }
     });
     y = pdf.lastAutoTable.finalY + 20;
   }
