@@ -17,11 +17,11 @@ import {
 
 import {
   soloDigitos, normalizarDia, formatearFecha, formatearHoraCompleta, formatearHoraCorta,
-  obtenerDiaSemana, evaluarPuntualidad, obtenerTramosValidos, MOTIVOS_CORRECCION, nombreMes, TOLERANCIA_MIN,
+  obtenerDiaSemana, evaluarPuntualidad, obtenerTramosValidos, MOTIVOS_CORRECCION, MOTIVO_NO_JUSTIFICADO, nombreMes, TOLERANCIA_MIN,
   calcularHashCodigo, codigoValido, calcularHuellaTexto, combinarFechaYHoraCanarias
 } from './logica-comun.js';
 
-export { MOTIVOS_CORRECCION };
+export { MOTIVOS_CORRECCION, MOTIVO_NO_JUSTIFICADO };
 
 // Perfiles de modalidad de trabajo válidos. "presencial" es el valor por
 // defecto para no romper a los trabajadores dados de alta antes de que
@@ -559,6 +559,31 @@ export async function obtenerRegistrosPendientes(db) {
     return dniCache[dni];
   }
 
+  // Horario previsto (semanal) de cada trabajador, para poder mostrarle al
+  // administrador qué tocaba ese día concreto al lado del fichaje real.
+  const horarioCache = {};
+  async function obtenerHorarioSemanal(dni) {
+    if (horarioCache[dni] !== undefined) return horarioCache[dni];
+    const hSnap = await getDoc(doc(db, 'horarios', dni));
+    horarioCache[dni] = hSnap.exists() ? hSnap.data() : {};
+    return horarioCache[dni];
+  }
+  function diaSemanaDeFechaStr_(fechaStr) {
+    const p = String(fechaStr).split('/').map(Number);
+    const d = new Date(p[2] || 1970, (p[1] || 1) - 1, p[0] || 1);
+    return ['Domingo', 'Lunes', 'Martes', 'Miercoles', 'Jueves', 'Viernes', 'Sabado'][d.getDay()];
+  }
+  function tramosDelDia_(horarioSemanal, fechaStr) {
+    const diaSemana = diaSemanaDeFechaStr_(fechaStr);
+    const claveDia = Object.keys(horarioSemanal || {}).find(function (d) { return normalizarDia(d) === normalizarDia(diaSemana); });
+    return obtenerTramosValidos(claveDia ? horarioSemanal[claveDia] : null);
+  }
+  function horarioTextoDelDia_(horarioSemanal, fechaStr) {
+    const tramos = tramosDelDia_(horarioSemanal, fechaStr);
+    if (tramos.length === 0) return 'Sin horario fijo asignado ese día';
+    return tramos.map(function (t) { return t.entrada + '–' + t.salida; }).join(' y ');
+  }
+
   const pendientes = [];
   const clavesYaAnadidas = {};
 
@@ -568,6 +593,7 @@ export async function obtenerRegistrosPendientes(db) {
     if (inc.justificada === 'Sí' || inc.justificada === 'Resuelto') continue;
     const dni = inc.trabajadorId;
     await obtenerDniInfo(dni);
+    const horarioSemanal = await obtenerHorarioSemanal(dni);
 
     const fichajeId = inc.fichajeId || null;
     const clave = fichajeId ? (dni + '|' + fichajeId) : null;
@@ -578,6 +604,8 @@ export async function obtenerRegistrosPendientes(db) {
     pendientes.push({
       trabajadorId: dni, trabajadorNombre: inc.nombre, trabajadorDni: dni, fichajeId: fichajeId,
       fecha: inc.fecha, hora: inc.hora, tipo: inc.tipo, detalle: inc.detalle,
+      horarioTexto: horarioTextoDelDia_(horarioSemanal, inc.fecha),
+      horarioTramos: tramosDelDia_(horarioSemanal, inc.fecha),
       origen: 'Automática', motivoTrabajador: (ultima && !ultima.valorRectificado) ? ultima.motivo : ''
     });
     if (clave) clavesYaAnadidas[clave] = true;
@@ -585,18 +613,21 @@ export async function obtenerRegistrosPendientes(db) {
 
   // 2) Solicitudes de corrección del trabajador sobre CUALQUIER registro
   // (esté marcado en rojo o no) que todavía no tienen respuesta.
-  Object.keys(cadenasPorClave).forEach(function (clave) {
-    if (clavesYaAnadidas[clave]) return;
+  for (const clave of Object.keys(cadenasPorClave)) {
+    if (clavesYaAnadidas[clave]) continue;
     const cadena = cadenasPorClave[clave];
     const ultima = cadena[cadena.length - 1];
-    if (!ultima || ultima.valorRectificado) return; // ya resuelta
-    if (ultima.rolSolicitante !== 'Trabajador') return; // una nota propia del admin no es "pendiente"
+    if (!ultima || ultima.valorRectificado) continue; // ya resuelta
+    if (ultima.rolSolicitante !== 'Trabajador') continue; // una nota propia del admin no es "pendiente"
+    const horarioSemanal = await obtenerHorarioSemanal(ultima.afectadoId);
     pendientes.push({
       trabajadorId: ultima.afectadoId, trabajadorNombre: ultima.afectadoNombre, trabajadorDni: ultima.afectadoId,
       fichajeId: ultima.fichajeId, fecha: ultima.fechaOriginal, hora: ultima.horaOriginal, tipo: ultima.tipoRegistro,
+      horarioTexto: horarioTextoDelDia_(horarioSemanal, ultima.fechaOriginal),
+      horarioTramos: tramosDelDia_(horarioSemanal, ultima.fechaOriginal),
       detalle: 'Solicitud de corrección del trabajador', origen: 'Solicitud del trabajador', motivoTrabajador: ultima.motivo
     });
-  });
+  }
 
   pendientes.sort(function (a, b) {
     const pa = String(a.fecha).split('/').map(Number), pb = String(b.fecha).split('/').map(Number);

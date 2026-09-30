@@ -774,13 +774,17 @@
 
     // Lista cerrada de motivos: la usa tanto el trabajador cuando indica que
     // un fichaje NO está justificado como el administrador cuando corrige un
-    // registro. Mantener EXACTAMENTE igual que MOTIVOS_CORRECCION_ en Code.gs.
+    // registro. Mantener EXACTAMENTE igual que MOTIVOS_CORRECCION en
+    // logica-comun.js. Política: todos estos motivos cuentan como
+    // justificados y trabajados (no descuentan), EXCEPTO
+    // "Falta de asistencia no justificada" (ver MOTIVO_NO_JUSTIFICADO_TEXTO).
     const MOTIVOS_CORRECCION = [
       'Asistencia a consulta médica',
       'Baja médica',
       'Citaciones judiciales o renovación DNI',
       'Exámenes prenatales',
       'Fallecimiento de familiar, accidente o enfermedad grave',
+      'Falta de asistencia no justificada',
       'Gestión Externa (labores realizadas fuera del centro de trabajo)',
       'Lactancia',
       'Maternidad',
@@ -788,6 +792,7 @@
       'Mudanza o traslado de municipio',
       'Paternidad'
     ];
+    const MOTIVO_NO_JUSTIFICADO_TEXTO = 'Falta de asistencia no justificada';
 
     function rellenarSelectMotivos(idSelect) {
       const sel = document.getElementById(idSelect);
@@ -1625,6 +1630,7 @@
           exp.style.display = 'block';
           exp.innerHTML = construirFormularioPendiente(pendientesActuales[idx], idx);
           rellenarSelectMotivos('motivo-pendiente-' + idx);
+          aplicarPoliticaMotivoPendiente(idx);
         } else {
           item.classList.remove('seleccionada');
           item.classList.add('deshabilitada');
@@ -1634,21 +1640,103 @@
       });
     }
 
+    // Dado un pendiente (con su horario previsto ya calculado en
+    // horarioTramos), sugiere la hora prevista más relevante para
+    // rellenar de un clic el campo "Hora correcta" — la de entrada si el
+    // aviso es de entrada, la de salida si es de salida, y si hay varios
+    // tramos, la más cercana a la hora que realmente fichó.
+    function obtenerHoraPrevistaSugerida(p) {
+      const tramos = p.horarioTramos || [];
+      if (tramos.length === 0) return null;
+      const campo = /salida|extra/i.test(p.tipo) ? 'salida' : 'entrada';
+      if (tramos.length === 1) return tramos[0][campo] || null;
+      const hr = String(p.hora || '').split(':').map(Number);
+      const minReal = (hr[0] || 0) * 60 + (hr[1] || 0);
+      let mejor = null, mejorDif = Infinity;
+      tramos.forEach(function (t) {
+        if (!t[campo]) return;
+        const hp = String(t[campo]).split(':').map(Number);
+        const dif = Math.abs(((hp[0] || 0) * 60 + (hp[1] || 0)) - minReal);
+        if (dif < mejorDif) { mejorDif = dif; mejor = t[campo]; }
+      });
+      return mejor;
+    }
+
+    function usarHoraSugeridaPendiente(idx, hora) {
+      const campo = document.getElementById('hora-pendiente-' + idx);
+      if (campo) campo.value = hora;
+    }
+    function usarHoraRealPendiente(idx) {
+      const p = pendientesActuales[idx];
+      const campo = document.getElementById('hora-pendiente-' + idx);
+      if (campo) campo.value = (p.hora !== '—' ? p.hora : '');
+    }
+
+    // Política de la organización: cualquier motivo de la lista cuenta como
+    // justificado y trabajado (se usa la hora PREVISTA, sin descuento),
+    // EXCEPTO "Falta de asistencia no justificada", que mantiene la hora
+    // REAL fichada (si genera descuento). Se aplica sola en cuanto se abre
+    // el formulario (con el primer motivo de la lista) y cada vez que el
+    // administrador cambia el motivo elegido; el administrador puede seguir
+    // ajustando la hora a mano después si un caso concreto lo requiere.
+    function aplicarPoliticaMotivoPendiente(idx) {
+      const p = pendientesActuales[idx];
+      if (p.tipo === 'Ausencia') return; // esta política solo aplica a fichajes con hora, no a ausencias de día completo
+      const sel = document.getElementById('motivo-pendiente-' + idx);
+      if (!sel) return;
+      sel.addEventListener('change', function () { alCambiarMotivoPendiente(idx); });
+      alCambiarMotivoPendiente(idx);
+    }
+
+    function alCambiarMotivoPendiente(idx) {
+      const p = pendientesActuales[idx];
+      const sel = document.getElementById('motivo-pendiente-' + idx);
+      const campoHora = document.getElementById('hora-pendiente-' + idx);
+      if (!sel || !campoHora) return;
+      if (sel.value === MOTIVO_NO_JUSTIFICADO_TEXTO) {
+        campoHora.value = (p.hora !== '—' ? p.hora : '');
+      } else {
+        const horaSugerida = obtenerHoraPrevistaSugerida(p);
+        campoHora.value = horaSugerida || (p.hora !== '—' ? p.hora : '');
+      }
+    }
+
     function construirFormularioPendiente(p, idx) {
       let html = '';
+      const esAusencia = p.tipo === 'Ausencia';
+
+      // 1) Qué fichó realmente el trabajador.
+      html += '<div class="fila-correccion" style="font-weight:600;">🕒 Fichaje registrado por el trabajador: ' +
+        p.fecha + (p.hora !== '—' ? ' · ' + p.hora : '') + (esAusencia ? '' : ' — ' + p.tipo) + '</div>';
+
+      // 2) Qué horario tenía previsto ese día (para poder decidir con conocimiento).
+      if (p.horarioTexto) {
+        html += '<div class="fila-correccion">📅 Horario previsto ese día: ' + p.horarioTexto + '</div>';
+      }
+
+      // 3) El motivo que el propio trabajador ha indicado, si lo indicó.
       if (p.motivoTrabajador) {
         html += '<div class="fila-correccion">📝 Motivo indicado por el trabajador: ' + p.motivoTrabajador + '</div>';
       }
-      const esAusencia = p.tipo === 'Ausencia';
+
+      // 4) Formulario de resolución del administrador.
       html +=
         '<label class="etiqueta-campo">Motivo' + (esAusencia ? ' de la ausencia' : ' de la corrección') + '</label>' +
         '<select class="campo-texto" id="motivo-pendiente-' + idx + '"></select>';
       if (!esAusencia) {
+        const horaSugerida = obtenerHoraPrevistaSugerida(p);
         html +=
           '<label class="etiqueta-campo">Fecha correcta</label>' +
           '<input type="text" class="campo-texto" id="fecha-pendiente-' + idx + '" value="' + p.fecha + '" placeholder="DD/MM/AAAA">' +
           '<label class="etiqueta-campo">Hora correcta</label>' +
-          '<input type="text" class="campo-texto" id="hora-pendiente-' + idx + '" value="' + (p.hora !== '—' ? p.hora : '') + '" placeholder="Ej: 08:00">';
+          '<input type="text" class="campo-texto" id="hora-pendiente-' + idx + '" value="' + (p.hora !== '—' ? p.hora : '') + '" placeholder="Ej: 08:00">' +
+          '<div style="margin:6px 0 2px;">' +
+          (horaSugerida ? '<button type="button" class="link-corregir" style="margin-right:12px;" onclick="usarHoraSugeridaPendiente(' + idx + ',\'' + horaSugerida + '\')">Usar la hora prevista (' + horaSugerida + ') — no descuenta</button>' : '') +
+          '<button type="button" class="link-corregir" onclick="usarHoraRealPendiente(' + idx + ')">Mantener la hora real fichada' + (p.hora !== '—' ? ' (' + p.hora + ')' : '') + '</button>' +
+          '</div>' +
+          '<div class="ayuda-pin" style="margin-top:4px;margin-bottom:10px;">' +
+          'Por defecto: cualquier motivo de la lista cuenta como <b>justificado y trabajado</b> (se rellena la hora prevista, sin descuento), excepto <b>"Falta de asistencia no justificada"</b>, que mantiene la hora real fichada y sí se descuenta del cómputo del mes. Al cambiar el motivo, la hora se ajusta sola; si necesitas un caso distinto, puedes corregirla a mano o usar estos botones.' +
+          '</div>';
       }
       html +=
         '<div class="fila-form-botones">' +

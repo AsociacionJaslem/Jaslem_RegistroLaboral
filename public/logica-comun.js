@@ -41,13 +41,22 @@ export function formatearCodigoVerificacion(huellaHex) {
 }
 
 // Lista cerrada de motivos (orden alfabético). Debe coincidir EXACTAMENTE
-// con MOTIVOS_CORRECCION en el resto del código.
+// con MOTIVOS_CORRECCION en el resto del código (hay una copia idéntica,
+// codificada a mano, en index.html).
+//
+// Política de la organización: TODOS los motivos de esta lista se
+// consideran justificados y cuentan como tiempo trabajado (no generan
+// descuento), EXCEPTO "Falta de asistencia no justificada", que es el
+// único que sí resta del cómputo del mes. Por eso este último motivo
+// tiene su propia constante (MOTIVO_NO_JUSTIFICADO), para que el resto
+// del código pueda reconocerlo sin tener que repetir el texto literal.
 export const MOTIVOS_CORRECCION = [
   'Asistencia a consulta médica',
   'Baja médica',
   'Citaciones judiciales o renovación DNI',
   'Exámenes prenatales',
   'Fallecimiento de familiar, accidente o enfermedad grave',
+  'Falta de asistencia no justificada',
   'Gestión Externa (labores realizadas fuera del centro de trabajo)',
   'Lactancia',
   'Maternidad',
@@ -55,6 +64,8 @@ export const MOTIVOS_CORRECCION = [
   'Mudanza o traslado de municipio',
   'Paternidad'
 ];
+
+export const MOTIVO_NO_JUSTIFICADO = 'Falta de asistencia no justificada';
 
 export function soloDigitos(valor) {
   return String(valor || '').replace(/[^0-9]/g, '');
