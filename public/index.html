@@ -603,10 +603,10 @@
               <div id="lista-festivos-registrados"><div class="vacio">Cargando…</div></div>
             </div>
 
-            <!-- PESTAÑA: Vacaciones y bajas (individual, uno/varios/todos) -->
+            <!-- PESTAÑA: Vacaciones, bajas y otros permisos (individual, uno/varios/todos) -->
             <div class="panel-admin-tab" id="admin-tab-bajas">
-              <div class="titulo-seccion">Vacaciones y bajas médicas</div>
-              <div class="ayuda-pin" style="margin-top:0;margin-bottom:10px;">Para las vacaciones o la baja médica de uno o varios trabajadores concretos (o de todos a la vez, si coinciden en las mismas fechas).</div>
+              <div class="titulo-seccion">Vacaciones, bajas y otros permisos</div>
+              <div class="ayuda-pin" style="margin-top:0;margin-bottom:10px;">Para cualquier periodo de uno o varios días completos en los que un trabajador (o varios, si coinciden) no tiene que fichar: vacaciones, baja médica, paternidad/maternidad, y el resto de motivos justificados. Todos estos días cuentan como trabajados, sin descontar del cómputo del mes — no hace falta fichar nada esos días.</div>
 
               <label class="etiqueta-campo">Desde</label>
               <input type="date" class="campo-texto" id="calb-fecha-inicio">
@@ -618,10 +618,7 @@
               </div>
 
               <label class="etiqueta-campo">Tipo</label>
-              <select class="campo-texto" id="calb-tipo">
-                <option value="Vacaciones">Vacaciones</option>
-                <option value="BajaMedica">Baja médica</option>
-              </select>
+              <select class="campo-texto" id="calb-tipo"></select>
 
               <label class="etiqueta-campo">Trabajador(es)</label>
               <div class="selector-trabajadores-calendario">
@@ -636,9 +633,9 @@
 
               <label class="etiqueta-campo">Nota (opcional — nunca escribas datos médicos aquí)</label>
               <input type="text" class="campo-texto" id="calb-nota" placeholder="Nota general, sin datos de salud">
-              <button class="btn btn-consultar" onclick="guardarBajaVacaciones()">Guardar vacaciones/baja</button>
+              <button class="btn btn-consultar" onclick="guardarBajaVacaciones()">Guardar</button>
 
-              <div class="titulo-seccion" style="margin-top:22px;">Vacaciones y bajas ya registradas</div>
+              <div class="titulo-seccion" style="margin-top:22px;">Vacaciones, bajas y permisos ya registrados</div>
               <div id="lista-bajas-registradas"><div class="vacio">Cargando…</div></div>
             </div>
 
@@ -798,6 +795,22 @@
       const sel = document.getElementById(idSelect);
       sel.innerHTML = '';
       MOTIVOS_CORRECCION.forEach(function (m) {
+        const opt = document.createElement('option');
+        opt.value = m; opt.textContent = m;
+        sel.appendChild(opt);
+      });
+    }
+
+    // Igual que rellenarSelectMotivos, pero para el desplegable de "Tipo"
+    // de la pestaña Vacaciones/bajas/permisos: ahí NO tiene sentido
+    // "Falta de asistencia no justificada" (eso no se planifica de
+    // antemano en el calendario, se gestiona fichaje a fichaje desde
+    // Pendientes), así que se excluye de este desplegable en concreto.
+    function rellenarSelectTipoCalendarioPropio(idSelect) {
+      const sel = document.getElementById(idSelect);
+      sel.innerHTML = '';
+      MOTIVOS_CORRECCION.forEach(function (m) {
+        if (m === MOTIVO_NO_JUSTIFICADO_TEXTO) return;
         const opt = document.createElement('option');
         opt.value = m; opt.textContent = m;
         sel.appendChild(opt);
@@ -2520,6 +2533,7 @@
     rellenarSelectoresMesAnio('select-mes-admin', 'select-anio-admin');
     rellenarSelectMotivos('motivo-no-justificada');
     rellenarSelectMotivos('correccion-admin-motivo');
+    rellenarSelectTipoCalendarioPropio('calb-tipo');
   </script>
 </body>
 </html>

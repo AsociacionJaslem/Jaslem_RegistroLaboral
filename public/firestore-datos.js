@@ -878,10 +878,13 @@ async function obtenerFechasAusenciaEnRango(db, dni, inicio, fin) {
   ]);
   const fechas = new Set();
   festivosSnap.forEach(function (d) { fechas.add(d.data().fecha); });
-  propiosSnap.forEach(function (d) {
-    const c = d.data();
-    if (c.tipo === 'Vacaciones' || c.tipo === 'BajaMedica') fechas.add(c.fecha);
-  });
+  // Cualquier día propio registrado en el calendario (Vacaciones, Baja
+  // médica, Paternidad, Maternidad, etc. — cualquier motivo justificado de
+  // MOTIVOS_CORRECCION) cuenta como ausencia justificada de todo el día:
+  // como estos documentos siempre tienen trabajadorId === dni (a
+  // diferencia de "Festivo", que siempre lo tiene a null), no hace falta
+  // comprobar el tipo concreto.
+  propiosSnap.forEach(function (d) { fechas.add(d.data().fecha); });
   const resultado = [];
   fechas.forEach(function (fechaStr) { if (fechaEnRango(fechaStr, inicio, fin)) resultado.push(fechaStr); });
   return resultado;
@@ -1064,21 +1067,29 @@ function parsearFechaISO(iso) {
   return new Date(partes[0], partes[1] - 1, partes[2]);
 }
 
-// dnisTrabajadores: para "Vacaciones"/"BajaMedica", una lista de DNI/NIE
-// (uno o varios trabajadores a la vez — por ejemplo, todo un equipo que
-// coincide de vacaciones). Para "Festivo" se ignora: siempre afecta a todo
-// el equipo (trabajadorId null), como hasta ahora — así se usa igual para
+// dnisTrabajadores: para cualquier tipo propio (Vacaciones, BajaMedica,
+// Paternidad, etc.), una lista de DNI/NIE (uno o varios trabajadores a la
+// vez — por ejemplo, todo un equipo que coincide de vacaciones). Para
+// "Festivo" se ignora: siempre afecta a todo el equipo (trabajadorId
+// null), como hasta ahora — así se usa igual para
 // un cierre por puente que para un festivo oficial, marcando el rango de
 // fechas que haga falta.
+// Tipos válidos para un periodo PROPIO de un trabajador (no "Festivo", que
+// es aparte y siempre afecta a todo el equipo): cualquier motivo
+// justificado de la lista cerrada, salvo "Falta de asistencia no
+// justificada" (eso no es algo que se planifique de antemano en el
+// calendario, se gestiona fichaje a fichaje desde "Pendientes").
+const TIPOS_CALENDARIO_PROPIO = MOTIVOS_CORRECCION.filter(function (m) { return m !== MOTIVO_NO_JUSTIFICADO; });
+
 export async function anadirPeriodoCalendario(db, fechaInicioISO, fechaFinISO, tipo, dnisTrabajadores, nota) {
   if (!fechaInicioISO || !tipo) return { ok: false, mensaje: 'Indica al menos la fecha de inicio y el tipo de día.' };
-  if (['Festivo', 'Vacaciones', 'BajaMedica'].indexOf(tipo) === -1) return { ok: false, mensaje: 'Tipo de día no válido.' };
+  if (tipo !== 'Festivo' && TIPOS_CALENDARIO_PROPIO.indexOf(tipo) === -1) return { ok: false, mensaje: 'Tipo de día no válido.' };
 
   let trabajadores = [{ dni: null, nombre: 'Todo el equipo' }];
   if (tipo !== 'Festivo') {
     const dnisLimpios = (Array.isArray(dnisTrabajadores) ? dnisTrabajadores : [dnisTrabajadores])
       .map(function (d) { return soloDigitos(d); }).filter(Boolean);
-    if (dnisLimpios.length === 0) return { ok: false, mensaje: 'Indica al menos un trabajador para vacaciones o baja médica.' };
+    if (dnisLimpios.length === 0) return { ok: false, mensaje: 'Indica al menos un trabajador.' };
 
     trabajadores = [];
     for (const dniLimpio of dnisLimpios) {
@@ -1167,12 +1178,17 @@ export async function obtenerCalendarioFestivos(db) {
   return { ok: true, rangos: rangos };
 }
 
-// Igual que la anterior, pero para vacaciones/bajas médicas: agrupa por
-// trabajador además de por fecha/nota, y añade el nombre de cada
-// trabajador (a partir de la lista de trabajadores, ya que "calendario"
-// solo guarda el DNI).
+// Igual que la anterior, pero para los periodos PROPIOS de cada
+// trabajador (vacaciones, bajas médicas, paternidad, maternidad, etc. —
+// cualquier motivo salvo "Festivo", que es aparte): agrupa por trabajador
+// además de por fecha/tipo/nota, y añade el nombre de cada trabajador (a
+// partir de la lista de trabajadores, ya que "calendario" solo guarda el
+// DNI). Se piden TODOS los documentos con trabajadorId != null en vez de
+// filtrar por una lista fija de tipos, para que cualquier motivo nuevo que
+// se añada a MOTIVOS_CORRECCION aparezca aquí sin tener que tocar esta
+// función.
 export async function obtenerCalendarioVacacionesBajas(db) {
-  const snap = await getDocs(query(collection(db, 'calendario'), where('tipo', 'in', ['Vacaciones', 'BajaMedica'])));
+  const snap = await getDocs(query(collection(db, 'calendario'), where('trabajadorId', '!=', null)));
   const dias = snap.docs.map(function (d) { return d.data(); });
   const rangos = agruparDiasCalendarioEnRangos(dias, function (d) { return d.tipo + '|' + d.trabajadorId + '|' + (d.nota || ''); });
 
@@ -1304,8 +1320,11 @@ async function obtenerAusenciasPeriodo(db, dni, inicio, fin) {
     if (fechaEnRango(c.fecha, inicio, fin)) dias.push(c);
   });
   propiosSnap.forEach(function (d) {
+    // Cualquier motivo justificado de MOTIVOS_CORRECCION es válido aquí
+    // (no solo Vacaciones/BajaMedica): ver la nota en
+    // obtenerFechasAusenciaEnRango.
     const c = d.data();
-    if ((c.tipo === 'Vacaciones' || c.tipo === 'BajaMedica') && fechaEnRango(c.fecha, inicio, fin)) dias.push(c);
+    if (fechaEnRango(c.fecha, inicio, fin)) dias.push(c);
   });
   return agruparDiasCalendarioEnRangos(dias, function (d) { return d.tipo + '|' + (d.nota || ''); });
 }
