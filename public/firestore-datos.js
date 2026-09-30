@@ -1080,6 +1080,75 @@ export async function anadirPeriodoCalendario(db, fechaInicioISO, fechaFinISO, t
   };
 }
 
+function parsearFechaDDMMAAAA_(fechaStr) {
+  const p = String(fechaStr || '').split('/').map(Number);
+  return new Date(p[2] || 0, (p[1] || 1) - 1, p[0] || 1).getTime();
+}
+
+// Agrupa días sueltos de "calendario" (uno por fecha, por trabajador) en
+// RANGOS legibles: fechas consecutivas con la misma clave (tipo +
+// trabajador + nota) se muestran como un solo periodo "del ... al ...",
+// en vez de una fila por cada día suelto. Los rangos más recientes van
+// primero.
+function agruparDiasCalendarioEnRangos(dias, claveDe) {
+  // Se agrupa PRIMERO por clave (nota, o trabajador+tipo+nota) y solo
+  // DESPUÉS se buscan días consecutivos dentro de cada grupo. Si se
+  // ordenara por fecha para todos los días a la vez, dos trabajadores con
+  // el mismo día (u días próximos) podrían intercalarse y romper la unión
+  // de días consecutivos de un mismo grupo.
+  const porClave = new Map();
+  dias.forEach(function (d) {
+    const clave = claveDe(d);
+    if (!porClave.has(clave)) porClave.set(clave, []);
+    porClave.get(clave).push(d);
+  });
+  const rangos = [];
+  porClave.forEach(function (lista, clave) {
+    const ordenados = lista.slice().sort(function (a, b) { return parsearFechaDDMMAAAA_(a.fecha) - parsearFechaDDMMAAAA_(b.fecha); });
+    ordenados.forEach(function (d) {
+      const ms = parsearFechaDDMMAAAA_(d.fecha);
+      const ultimo = rangos.length ? rangos[rangos.length - 1] : null;
+      if (ultimo && ultimo._clave === clave && ms - ultimo._finMs === 86400000) {
+        ultimo.fin = d.fecha; ultimo._finMs = ms; ultimo.dias++;
+      } else {
+        rangos.push({ inicio: d.fecha, fin: d.fecha, _finMs: ms, _clave: clave, dias: 1, nota: d.nota || '', trabajadorId: d.trabajadorId || null, tipo: d.tipo });
+      }
+    });
+  });
+  rangos.sort(function (a, b) { return b._finMs - a._finMs; });
+  return rangos.map(function (r) { return { inicio: r.inicio, fin: r.fin, dias: r.dias, nota: r.nota, trabajadorId: r.trabajadorId, tipo: r.tipo }; });
+}
+
+// Listado de festivos/cierres ya registrados (afectan a todo el equipo),
+// agrupados en rangos, más recientes primero — para que el administrador
+// vea de un vistazo lo que ya hay guardado, no solo pueda añadir más.
+export async function obtenerCalendarioFestivos(db) {
+  const snap = await getDocs(query(collection(db, 'calendario'), where('tipo', '==', 'Festivo')));
+  const dias = snap.docs.map(function (d) { return d.data(); });
+  const rangos = agruparDiasCalendarioEnRangos(dias, function (d) { return d.nota || ''; });
+  return { ok: true, rangos: rangos };
+}
+
+// Igual que la anterior, pero para vacaciones/bajas médicas: agrupa por
+// trabajador además de por fecha/nota, y añade el nombre de cada
+// trabajador (a partir de la lista de trabajadores, ya que "calendario"
+// solo guarda el DNI).
+export async function obtenerCalendarioVacacionesBajas(db) {
+  const snap = await getDocs(query(collection(db, 'calendario'), where('tipo', 'in', ['Vacaciones', 'BajaMedica'])));
+  const dias = snap.docs.map(function (d) { return d.data(); });
+  const rangos = agruparDiasCalendarioEnRangos(dias, function (d) { return d.tipo + '|' + d.trabajadorId + '|' + (d.nota || ''); });
+
+  const dnis = Array.from(new Set(rangos.map(function (r) { return r.trabajadorId; }).filter(Boolean)));
+  const nombresPorDni = {};
+  for (const dni of dnis) {
+    const t = await buscarTrabajadorPorDni(db, dni);
+    nombresPorDni[dni] = t ? t.nombre : ('DNI ' + dni);
+  }
+  rangos.forEach(function (r) { r.trabajadorNombre = r.trabajadorId ? (nombresPorDni[r.trabajadorId] || ('DNI ' + r.trabajadorId)) : ''; });
+
+  return { ok: true, rangos: rangos };
+}
+
 // =====================================================================
 // INFORMES: cálculo de periodos (idéntico al que tenían las Cloud Functions)
 // =====================================================================
