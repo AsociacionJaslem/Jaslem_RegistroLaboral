@@ -592,6 +592,9 @@
               <label class="etiqueta-campo">Nota (opcional)</label>
               <input type="text" class="campo-texto" id="calf-nota" placeholder="Ej: Puente de diciembre, Festivo local...">
               <button class="btn btn-consultar" onclick="guardarFestivo()">Guardar festivo/cierre</button>
+
+              <div class="titulo-seccion" style="margin-top:22px;">Festivos y cierres ya registrados</div>
+              <div id="lista-festivos-registrados"><div class="vacio">Cargando…</div></div>
             </div>
 
             <!-- PESTAÑA: Vacaciones y bajas (individual, uno/varios/todos) -->
@@ -628,6 +631,9 @@
               <label class="etiqueta-campo">Nota (opcional — nunca escribas datos médicos aquí)</label>
               <input type="text" class="campo-texto" id="calb-nota" placeholder="Nota general, sin datos de salud">
               <button class="btn btn-consultar" onclick="guardarBajaVacaciones()">Guardar vacaciones/baja</button>
+
+              <div class="titulo-seccion" style="margin-top:22px;">Vacaciones y bajas ya registradas</div>
+              <div id="lista-bajas-registradas"><div class="vacio">Cargando…</div></div>
             </div>
 
             <!-- PESTAÑA: Trabajadores (listado, baja/reactivar, editar datos, invitar) -->
@@ -672,8 +678,10 @@
             <!-- PESTAÑA: Informes -->
             <div class="panel-admin-tab" id="admin-tab-informes">
               <div class="titulo-seccion">Generar informes</div>
-              <label class="etiqueta-campo">DNI/NIE del trabajador</label>
-              <input type="text" inputmode="numeric" pattern="[0-9]*" maxlength="9" class="campo-texto" id="inf-dni" placeholder="DNI/NIE del trabajador">
+              <label class="etiqueta-campo">Trabajador</label>
+              <select class="campo-texto" id="inf-dni">
+                <option value="">Cargando trabajadores…</option>
+              </select>
               <label class="etiqueta-campo">Tipo de periodo</label>
               <select class="campo-texto" id="inf-tipo-periodo">
                 <option value="diario">Diario</option>
@@ -1754,8 +1762,14 @@
         document.getElementById('admin-tabbtn-' + t).classList.toggle('activo', t === nombre);
       });
       if (nombre === 'horarios') cargarListaTrabajadoresHorarios();
-      if (nombre === 'bajas') cargarListaTrabajadoresBajas();
+      if (nombre === 'festivos') cargarListaFestivosRegistrados();
+      if (nombre === 'bajas') { cargarListaTrabajadoresBajas(); cargarListaBajasRegistradas(); }
       if (nombre === 'trabajadores') cargarListaTrabajadores();
+      if (nombre === 'informes') cargarListaTrabajadoresInformes();
+    }
+
+    function formatearRangoCalendario_(r) {
+      return (r.inicio === r.fin) ? r.inicio : (r.inicio + ' – ' + r.fin);
     }
 
     function formatearFechaISO_(d) {
@@ -1814,6 +1828,23 @@
         .catch(function () { ocultarCargando(); mostrarPopup('Error de conexión', 'No se pudo guardar el calendario.', 'error'); });
     }
 
+    function cargarListaFestivosRegistrados() {
+      const contenedor = document.getElementById('lista-festivos-registrados');
+      contenedor.innerHTML = '<div class="vacio">Cargando…</div>';
+      datosFirestore.obtenerCalendarioFestivos(db)
+        .then(function (res) {
+          if (!res.ok) { contenedor.innerHTML = '<div class="vacio">' + (res.mensaje || 'No se pudo cargar.') + '</div>'; return; }
+          if (res.rangos.length === 0) { contenedor.innerHTML = '<div class="vacio">Todavía no hay ningún festivo ni cierre registrado.</div>'; return; }
+          contenedor.innerHTML = res.rangos.map(function (r) {
+            return '<div class="tarjeta-trabajador">' +
+              '<div class="datos-trabajador-lista"><span class="nombre-tl">' + formatearRangoCalendario_(r) + '</span>' +
+              '<span class="detalle-tl">' + r.dias + ' día' + (r.dias === 1 ? '' : 's') + (r.nota ? ' · ' + r.nota : '') + '</span></div>' +
+              '</div>';
+          }).join('');
+        })
+        .catch(function () { contenedor.innerHTML = '<div class="vacio">No se pudo cargar el listado.</div>'; });
+    }
+
     // ---------- PESTAÑA "Vacaciones y bajas" (uno, varios o todos) ----------
     function cargarListaTrabajadoresBajas() {
       const contenedor = document.getElementById('calb-lista-trabajadores');
@@ -1860,6 +1891,26 @@
           document.getElementById('calb-nota').value = '';
         })
         .catch(function () { ocultarCargando(); mostrarPopup('Error de conexión', 'No se pudo guardar el calendario.', 'error'); });
+    }
+
+    const ETIQUETAS_TIPO_CALENDARIO = { Vacaciones: 'Vacaciones', BajaMedica: 'Baja médica' };
+    function cargarListaBajasRegistradas() {
+      const contenedor = document.getElementById('lista-bajas-registradas');
+      contenedor.innerHTML = '<div class="vacio">Cargando…</div>';
+      datosFirestore.obtenerCalendarioVacacionesBajas(db)
+        .then(function (res) {
+          if (!res.ok) { contenedor.innerHTML = '<div class="vacio">' + (res.mensaje || 'No se pudo cargar.') + '</div>'; return; }
+          if (res.rangos.length === 0) { contenedor.innerHTML = '<div class="vacio">Todavía no hay ninguna vacación ni baja registrada.</div>'; return; }
+          contenedor.innerHTML = res.rangos.map(function (r) {
+            const etiqueta = ETIQUETAS_TIPO_CALENDARIO[r.tipo] || r.tipo;
+            return '<div class="tarjeta-trabajador">' +
+              '<div class="datos-trabajador-lista"><span class="nombre-tl">' + (r.trabajadorNombre || '') + '</span>' +
+              '<span class="detalle-tl">' + formatearRangoCalendario_(r) + ' · ' + r.dias + ' día' + (r.dias === 1 ? '' : 's') + (r.nota ? ' · ' + r.nota : '') + '</span>' +
+              '<span class="etiqueta-perfil-trabajo ' + (r.tipo === 'BajaMedica' ? 'teletrabajo' : 'presencial') + '">' + etiqueta + '</span></div>' +
+              '</div>';
+          }).join('');
+        })
+        .catch(function () { contenedor.innerHTML = '<div class="vacio">No se pudo cargar el listado.</div>'; });
     }
 
     // ---------- PESTAÑA "Horarios" ----------
@@ -1912,16 +1963,11 @@
           '<span class="etiqueta-perfil-trabajo ' + perfil + '">' + ETIQUETAS_PERFIL[perfil] + '</span></div>' +
           '<span class="etiqueta-estado-trabajador ' + (t.activo ? 'activo' : 'baja') + '">' + (t.activo ? 'Activo' : 'De baja') + '</span>' +
           '<button class="btn-cambiar-estado" style="background:#EFF3F6;color:#33454F;" data-dni="' + t.dni + '" data-editar-datos="1">Editar datos</button>' +
-          (t.activo ? '<button class="btn-cambiar-estado" style="background:#F1EEFB;color:#5B3FA0;" data-dni="' + t.dni + '" data-editar-horario="1">Editar horario</button>' : '') +
           (t.activo ? '<button class="btn-cambiar-estado" style="background:#E3F0FB;color:#2C5F8A;" data-dni="' + t.dni + '" data-invitar="1">Enviar invitación</button>' : '') +
           '<button class="btn-cambiar-estado ' + (t.activo ? 'dar-baja' : 'reactivar') + '" data-dni="' + t.dni + '" data-activo="' + t.activo + '">' + (t.activo ? 'Dar de baja' : 'Reactivar') + '</button>' +
           '</div>';
       });
       contenedor.innerHTML = html;
-
-      contenedor.querySelectorAll('[data-editar-horario]').forEach(function (btn) {
-        btn.addEventListener('click', function () { abrirEdicionHorario(btn.getAttribute('data-dni')); });
-      });
 
       contenedor.querySelectorAll('[data-editar-datos]').forEach(function (btn) {
         btn.addEventListener('click', function () { abrirEdicionDatos(btn.getAttribute('data-dni')); });
@@ -2274,6 +2320,24 @@
     }
 
     // ---------- ADMINISTRACIÓN: generación de informes ----------
+    function cargarListaTrabajadoresInformes() {
+      const select = document.getElementById('inf-dni');
+      select.innerHTML = '<option value="">Cargando trabajadores…</option>';
+      datosFirestore.obtenerListaTrabajadores(db)
+        .then(function (res) {
+          if (!res.ok) { select.innerHTML = '<option value="">' + res.mensaje + '</option>'; return; }
+          if (res.trabajadores.length === 0) { select.innerHTML = '<option value="">No hay trabajadores dados de alta</option>'; return; }
+          const ordenados = res.trabajadores.slice().sort(function (a, b) {
+            if (a.activo !== b.activo) return a.activo ? -1 : 1;
+            return a.nombre.localeCompare(b.nombre);
+          });
+          select.innerHTML = '<option value="">Selecciona un trabajador…</option>' + ordenados.map(function (t) {
+            return '<option value="' + t.dni + '">' + t.nombre + (t.activo ? '' : ' (de baja)') + '</option>';
+          }).join('');
+        })
+        .catch(function () { select.innerHTML = '<option value="">No se pudo cargar la lista</option>'; });
+    }
+
     document.addEventListener('DOMContentLoaded', function () {
       const selectTipoPeriodo = document.getElementById('inf-tipo-periodo');
       const fechaReferenciaEl = document.getElementById('inf-fecha-referencia');
@@ -2297,7 +2361,7 @@
       const proteger = document.getElementById('inf-proteger').checked;
       const password = document.getElementById('inf-password').value;
 
-      if (!dni) { mostrarPopup('Falta el DNI/NIE', 'Indica el DNI/NIE del trabajador.', 'error'); return; }
+      if (!dni) { mostrarPopup('Falta el trabajador', 'Selecciona de la lista el trabajador del que quieres el informe.', 'error'); return; }
       if (tipoPeriodo !== 'historico_completo' && !fechaReferencia) {
         mostrarPopup('Falta la fecha', 'Elige una fecha cualquiera dentro del periodo que quieres informar.', 'error'); return;
       }
