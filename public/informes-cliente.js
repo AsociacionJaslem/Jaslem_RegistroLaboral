@@ -76,9 +76,29 @@ async function cifrarEnZip(blob, nombreDentroDelZip, password) {
 function contenidoCanonico(trabajador, periodo, datos) {
   const partes = [
     'JASLEM-INFORME-v1', trabajador.dni, trabajador.nombre, periodo.etiqueta,
-    JSON.stringify(datos.registros), JSON.stringify(datos.incidencias), JSON.stringify(datos.correcciones)
+    JSON.stringify(datos.registros), JSON.stringify(datos.incidencias), JSON.stringify(datos.correcciones),
+    JSON.stringify(datos.ausencias || [])
   ];
   return partes.join('␟');
+}
+
+const ETIQUETAS_TIPO_AUSENCIA = { Festivo: 'Festivo / cierre', Vacaciones: 'Vacaciones', BajaMedica: 'Baja médica' };
+
+// Cadena de correcciones (solicitudes y resoluciones) de UN fichaje
+// concreto, en orden cronológico — para mostrarla justo debajo de su fila,
+// nunca en un bloque aparte.
+function cadenaCorreccionesDe(r, correcciones) {
+  return (correcciones || []).filter(function (c) { return c.fichajeId === r.fichajeId || c.fichajeId === r.id; })
+    .sort(function (a, b) { return (a.timestampMs || 0) - (b.timestampMs || 0); });
+}
+
+function textoCorreccion(c) {
+  return (c.fechaSolicitud || '') + ' — ' + c.rolSolicitante + ' (' + c.solicitanteNombre + '): ' + c.motivo +
+    (c.valorRectificado ? ' → fijado en ' + c.valorRectificado.hora + ' (' + c.valorRectificado.fecha + ')' : ' (pendiente de respuesta)');
+}
+
+function formatearRangoAusencia_(r) {
+  return (r.inicio === r.fin) ? r.inicio : (r.inicio + ' – ' + r.fin);
 }
 
 // opciones: { proteger: true|false (por defecto true), password: 'xxxx' (opcional, si no se indica se genera una) }
@@ -174,9 +194,19 @@ function generarPdf(logoBase64, trabajador, periodo, datos, certificacion) {
   pdf.setFont('helvetica', 'bold');
   pdf.text('Horas trabajadas en el periodo: ' + calcularHorasTrabajadas(datos.registros), 40, 166);
 
-  const filas = datos.registros.map(function (r) {
+  // Cada fichaje en su fila normal; si tiene alguna corrección (la pidiera
+  // el trabajador o la certificara el administrador, sea o no un motivo
+  // legalmente justificativo), se añade justo debajo, en su propia fila,
+  // nunca en un bloque aparte al final.
+  const filas = [];
+  const filasCorreccion = {};
+  datos.registros.forEach(function (r) {
     const estado = estadoDeRegistro(r, datos.correcciones);
-    return [r.fecha, r.hora, r.tipo, estado.etiqueta, (r.advertencia || '').replace('ADVERTENCIA: ', '')];
+    filas.push([r.fecha, r.hora, r.tipo, estado.etiqueta, (r.advertencia || '').replace('ADVERTENCIA: ', '')]);
+    cadenaCorreccionesDe(r, datos.correcciones).forEach(function (c) {
+      filas.push(['', '', '', '', '↳ ' + textoCorreccion(c)]);
+      filasCorreccion[filas.length - 1] = true;
+    });
   });
 
   pdf.autoTable({
@@ -186,7 +216,14 @@ function generarPdf(logoBase64, trabajador, periodo, datos, certificacion) {
     headStyles: { fillColor: COLOR_VERDE_OSCURO, textColor: [255, 255, 255], fontSize: 9 },
     styles: { fontSize: 8.5, textColor: COLOR_TEXTO },
     didParseCell: function (data) {
-      if (data.section === 'body' && data.column.index === 3) {
+      if (data.section !== 'body') return;
+      if (filasCorreccion[data.row.index]) {
+        data.cell.styles.fontStyle = 'italic';
+        data.cell.styles.textColor = [185, 119, 14];
+        data.cell.styles.fontSize = 8;
+        return;
+      }
+      if (data.column.index === 3) {
         const color = COLORES_ESTADO[data.cell.raw] || COLOR_TEXTO;
         data.cell.styles.textColor = color;
         data.cell.styles.fontStyle = 'bold';
@@ -207,20 +244,43 @@ function generarPdf(logoBase64, trabajador, periodo, datos, certificacion) {
   });
   y += 20;
 
-  if (datos.correcciones.length > 0) {
-    pdf.setFont('helvetica', 'bold'); pdf.setFontSize(10);
+  // ---------- PÁGINA APARTE: vacaciones, permisos y bajas del periodo ----------
+  // Festivos/cierres de todo el equipo y vacaciones/bajas médicas propias
+  // del trabajador — nunca mezclados con la tabla de fichajes de arriba.
+  if (datos.ausencias && datos.ausencias.length > 0) {
+    pdf.addPage();
+    let y2 = 40;
     pdf.setTextColor.apply(pdf, COLOR_VERDE_OSCURO);
-    pdf.text('Correcciones registradas en el periodo', 40, y);
-    y += 14;
-    pdf.setFont('helvetica', 'normal'); pdf.setFontSize(8.5);
+    pdf.setFont('helvetica', 'bold'); pdf.setFontSize(14);
+    pdf.text('Vacaciones, permisos y bajas del periodo', 40, y2);
+    y2 += 10;
+    pdf.setDrawColor.apply(pdf, COLOR_VERDE_OSCURO);
+    pdf.setLineWidth(1);
+    pdf.line(40, y2, 555, y2);
+    y2 += 20;
+
+    const resumenPorTipo = {};
+    datos.ausencias.forEach(function (r) { resumenPorTipo[r.tipo] = (resumenPorTipo[r.tipo] || 0) + r.dias; });
+    const resumenTexto = Object.keys(resumenPorTipo).map(function (k) {
+      const dias = resumenPorTipo[k];
+      return (ETIQUETAS_TIPO_AUSENCIA[k] || k) + ': ' + dias + ' día' + (dias === 1 ? '' : 's');
+    }).join('   ·   ');
+    pdf.setFont('helvetica', 'normal'); pdf.setFontSize(9.5);
     pdf.setTextColor.apply(pdf, COLOR_TEXTO);
-    datos.correcciones.forEach(function (c) {
-      if (y > 760) { pdf.addPage(); y = 40; }
-      const linea = (c.fechaSolicitud || '') + ' — ' + c.rolSolicitante + ' (' + c.solicitanteNombre + '): ' + c.tipoRegistro + ' del ' + c.fechaOriginal + ' ' + c.horaOriginal + ' — ' + c.motivo + (c.valorRectificado ? ' (fijado: ' + c.valorRectificado.hora + ' el ' + c.valorRectificado.fecha + ')' : '');
-      const lineasPartidas = pdf.splitTextToSize(linea, 515);
-      pdf.text(lineasPartidas, 40, y);
-      y += 12 * lineasPartidas.length;
+    pdf.text(resumenTexto, 40, y2);
+    y2 += 16;
+
+    const filasAusencias = datos.ausencias.map(function (r) {
+      return [ETIQUETAS_TIPO_AUSENCIA[r.tipo] || r.tipo, formatearRangoAusencia_(r), String(r.dias), r.nota || ''];
     });
+    pdf.autoTable({
+      startY: y2,
+      head: [['Tipo', 'Periodo', 'Días', 'Nota']],
+      body: filasAusencias,
+      headStyles: { fillColor: COLOR_VERDE_OSCURO, textColor: [255, 255, 255], fontSize: 9 },
+      styles: { fontSize: 8.5, textColor: COLOR_TEXTO }
+    });
+    y = pdf.lastAutoTable.finalY + 20;
   }
 
   // ---------- SELLO DE CERTIFICACIÓN (en la última página) ----------
@@ -262,19 +322,16 @@ function generarExcel(trabajador, periodo, datos, certificacion) {
     ['Horas trabajadas en el periodo: ' + calcularHorasTrabajadas(datos.registros)]
   ];
   filas.push([], ['Fecha', 'Hora', 'Tipo', 'Estado', 'Detalle']);
+  // Cada fichaje en su fila normal; sus correcciones (si tiene) van justo
+  // debajo, en su propia fila, nunca en un bloque aparte al final.
   datos.registros.forEach(function (r) {
     const estado = estadoDeRegistro(r, datos.correcciones);
     filas.push([r.fecha, r.hora, r.tipo, estado.etiqueta, (r.advertencia || '').replace('ADVERTENCIA: ', '')]);
+    cadenaCorreccionesDe(r, datos.correcciones).forEach(function (c) {
+      filas.push(['', '', '', '', '↳ ' + textoCorreccion(c)]);
+    });
   });
   if (datos.registros.length === 0) filas.push(['Sin fichajes registrados en este periodo.']);
-
-  if (datos.correcciones.length > 0) {
-    filas.push([]);
-    filas.push(['Correcciones registradas en el periodo']);
-    datos.correcciones.forEach(function (c) {
-      filas.push([(c.fechaSolicitud || '') + ' — ' + c.rolSolicitante + ' (' + c.solicitanteNombre + '): ' + c.tipoRegistro + ' del ' + c.fechaOriginal + ' ' + c.horaOriginal + ' — ' + c.motivo + (c.valorRectificado ? ' (fijado: ' + c.valorRectificado.hora + ' el ' + c.valorRectificado.fecha + ')' : '')]);
-    });
-  }
 
   filas.push([]);
   filas.push(['Documento certificado']);
@@ -286,7 +343,29 @@ function generarExcel(trabajador, periodo, datos, certificacion) {
   const hoja = window.XLSX.utils.aoa_to_sheet(filas);
   hoja['!cols'] = [{ wch: 14 }, { wch: 12 }, { wch: 14 }, { wch: 18 }, { wch: 45 }];
   const libro = window.XLSX.utils.book_new();
-  window.XLSX.utils.book_append_sheet(libro, hoja, 'Informe');
+  window.XLSX.utils.book_append_sheet(libro, hoja, 'Fichajes');
+
+  // ---------- HOJA APARTE: vacaciones, permisos y bajas del periodo ----------
+  if (datos.ausencias && datos.ausencias.length > 0) {
+    const resumenPorTipo = {};
+    datos.ausencias.forEach(function (r) { resumenPorTipo[r.tipo] = (resumenPorTipo[r.tipo] || 0) + r.dias; });
+    const filasAusencias = [
+      [NOMBRE_ORGANIZACION + ' — Vacaciones, permisos y bajas de ' + periodo.etiqueta],
+      ['Trabajador: ' + trabajador.nombre + '   DNI/NIE: ' + trabajador.dni],
+      [Object.keys(resumenPorTipo).map(function (k) {
+        const dias = resumenPorTipo[k];
+        return (ETIQUETAS_TIPO_AUSENCIA[k] || k) + ': ' + dias + ' día' + (dias === 1 ? '' : 's');
+      }).join('   ·   ')],
+      [], ['Tipo', 'Periodo', 'Días', 'Nota']
+    ];
+    datos.ausencias.forEach(function (r) {
+      filasAusencias.push([ETIQUETAS_TIPO_AUSENCIA[r.tipo] || r.tipo, formatearRangoAusencia_(r), r.dias, r.nota || '']);
+    });
+    const hojaAusencias = window.XLSX.utils.aoa_to_sheet(filasAusencias);
+    hojaAusencias['!cols'] = [{ wch: 16 }, { wch: 24 }, { wch: 8 }, { wch: 40 }];
+    window.XLSX.utils.book_append_sheet(libro, hojaAusencias, 'Ausencias');
+  }
+
   const buffer = window.XLSX.write(libro, { bookType: 'xlsx', type: 'array' });
   return new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
 }

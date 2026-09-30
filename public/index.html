@@ -132,6 +132,9 @@
 
     /* ---------- MIS REGISTROS: cabecera con "Cerrar Usuario" ---------- */
     .panel-objetivo-teletrabajo { background: #EAF4F1; border-radius: 12px; padding: 10px 12px; margin-bottom: 12px; font-size: 12.5px; color: var(--verde-oscuro); line-height: 1.5; }
+    .panel-ausencias-mis-registros { background: #FBF3E3; border-radius: 12px; padding: 10px 12px; margin-bottom: 12px; font-size: 12.5px; color: #8A5A1E; line-height: 1.5; }
+    .fila-ausencia-mis-registros { margin-bottom: 2px; }
+    .fila-ausencia-mis-registros:last-child { margin-bottom: 0; }
     .cabecera-mis-registros { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; }
     .titulo-mis-registros { font-weight: 800; color: var(--verde-oscuro); font-size: 14px; }
     .btn-cerrar-usuario { background: none; border: none; color: var(--rojo-error); font-size: 12px; font-weight: 700; cursor: pointer; padding: 4px; }
@@ -1272,10 +1275,25 @@
       return html;
     }
 
+    // Festivos, vacaciones y bajas médicas del mes consultado — el mismo
+    // dato (agrupado en rangos) que luego se ve en el informe descargable,
+    // para que ambos sitios muestren siempre lo mismo.
+    function htmlAusenciasMisRegistros(res) {
+      if (!res.ausencias || res.ausencias.length === 0) return '';
+      const etiquetas = Object.assign({ Festivo: 'Festivo / cierre' }, ETIQUETAS_TIPO_CALENDARIO);
+      const filas = res.ausencias.map(function (r) {
+        return '<div class="fila-ausencia-mis-registros"><b>' + (etiquetas[r.tipo] || r.tipo) + '</b> — ' +
+          formatearRangoCalendario_(r) + ' (' + r.dias + ' día' + (r.dias === 1 ? '' : 's') + ')' +
+          (r.nota ? ' · ' + r.nota : '') + '</div>';
+      }).join('');
+      return '<div class="panel-ausencias-mis-registros"><div class="titulo-seccion" style="margin-bottom:6px;">Festivos, vacaciones y bajas este mes</div>' + filas + '</div>';
+    }
+
     function renderizarMisRegistros(res, contenedor) {
       const panelObjetivo = htmlObjetivoTeletrabajo(res);
+      const panelAusencias = htmlAusenciasMisRegistros(res);
       if (res.registros.length === 0) {
-        contenedor.innerHTML = panelObjetivo + '<div class="vacio">Sin fichajes este mes.</div>';
+        contenedor.innerHTML = panelObjetivo + panelAusencias + '<div class="vacio">Sin fichajes este mes.</div>';
         return;
       }
       function cadenaDe(r) {
@@ -1328,7 +1346,7 @@
         '<span><span class="punto violeta"></span> Corrección ya solicitada</span>' +
         '<span><span class="punto naranja"></span> Corregido por la empresa</span>' +
         '</div>';
-      contenedor.innerHTML = panelObjetivo + html;
+      contenedor.innerHTML = panelObjetivo + panelAusencias + html;
       contenedor.querySelectorAll('.link-corregir').forEach(function (btn) {
         btn.addEventListener('click', function (e) {
           e.stopPropagation();

@@ -343,6 +343,12 @@ export async function obtenerMisRegistros(db, auth, mes, anio) {
   if (!trabajador) return { ok: false, mensaje: 'No se encontró tu ficha de trabajador.' };
   const datos = await obtenerRegistrosPorDni(db, trabajador.dni, mes, anio);
 
+  // Ausencias (festivos, vacaciones, bajas médicas) del mismo mes — el mismo
+  // dato que se ve en el informe descargable, para que coincidan siempre.
+  const inicioMes = new Date(Number(anio), Number(mes) - 1, 1);
+  const finMes = new Date(Number(anio), Number(mes), 0);
+  datos.ausencias = await obtenerAusenciasPeriodo(db, trabajador.dni, inicioMes, finMes);
+
   // Si es teletrabajo/mixta con objetivo de horas semanales, se añade el
   // resumen de horas pendientes del mes consultado (con fecha de corte
   // "hoy" si es el mes en curso, o el último día de ese mes si es uno ya
@@ -1251,11 +1257,33 @@ export function estadoDeRegistro(r, correcciones) {
 // de mes/año exacto. El timestampMs de cada registro ya refleja el valor
 // OFICIAL (rectificado o no), para que calcularHorasTrabajadas cuente
 // siempre las horas correctas en los informes.
+// Ausencias (festivos de todo el equipo, y vacaciones/bajas médicas propias)
+// de UN trabajador dentro de un rango de fechas, agrupadas en rangos legibles
+// — para mostrarlas junto al fichaje, tanto en "Mis registros" como en los
+// informes descargables (siempre el mismo dato, en los dos sitios).
+async function obtenerAusenciasPeriodo(db, dni, inicio, fin) {
+  const [festivosSnap, propiosSnap] = await Promise.all([
+    getDocs(query(collection(db, 'calendario'), where('tipo', '==', 'Festivo'))),
+    getDocs(query(collection(db, 'calendario'), where('trabajadorId', '==', dni)))
+  ]);
+  const dias = [];
+  festivosSnap.forEach(function (d) {
+    const c = d.data();
+    if (fechaEnRango(c.fecha, inicio, fin)) dias.push(c);
+  });
+  propiosSnap.forEach(function (d) {
+    const c = d.data();
+    if ((c.tipo === 'Vacaciones' || c.tipo === 'BajaMedica') && fechaEnRango(c.fecha, inicio, fin)) dias.push(c);
+  });
+  return agruparDiasCalendarioEnRangos(dias, function (d) { return d.tipo + '|' + (d.nota || ''); });
+}
+
 export async function obtenerDatosPeriodo(db, dni, inicio, fin) {
-  const [fichajesSnap, incidenciasSnap, correccionesSnap] = await Promise.all([
+  const [fichajesSnap, incidenciasSnap, correccionesSnap, ausencias] = await Promise.all([
     getDocs(collection(db, 'trabajadores', dni, 'fichajes')),
     getDocs(collection(db, 'trabajadores', dni, 'incidencias')),
-    getDocs(collection(db, 'trabajadores', dni, 'correcciones'))
+    getDocs(collection(db, 'trabajadores', dni, 'correcciones')),
+    obtenerAusenciasPeriodo(db, dni, inicio, fin)
   ]);
 
   const construido = construirRegistrosConCadenas(fichajesSnap.docs, correccionesSnap.docs);
@@ -1266,7 +1294,7 @@ export async function obtenerDatosPeriodo(db, dni, inicio, fin) {
   const incidencias = incidenciasSnap.docs.map(function (d) { return d.data(); }).filter(function (i) { return fechaEnRango(i.fecha, inicio, fin); });
   const correcciones = construido.correccionesTodas.filter(function (c) { return fechaEnRango(c.fechaOriginal, inicio, fin); });
 
-  return { registros: registros, incidencias: incidencias, correcciones: correcciones };
+  return { registros: registros, incidencias: incidencias, correcciones: correcciones, ausencias: ausencias };
 }
 
 // Todo el historial de un trabajador, sin límite de fechas — lo necesita el
@@ -1274,10 +1302,11 @@ export async function obtenerDatosPeriodo(db, dni, inicio, fin) {
 // antes de dar de baja a alguien (la ley exige poder entregarle TODO su
 // registro, desde el primer día que fichó, no solo un periodo concreto).
 export async function obtenerDatosHistoricoCompleto(db, dni) {
-  const [fichajesSnap, incidenciasSnap, correccionesSnap] = await Promise.all([
+  const [fichajesSnap, incidenciasSnap, correccionesSnap, ausencias] = await Promise.all([
     getDocs(collection(db, 'trabajadores', dni, 'fichajes')),
     getDocs(collection(db, 'trabajadores', dni, 'incidencias')),
-    getDocs(collection(db, 'trabajadores', dni, 'correcciones'))
+    getDocs(collection(db, 'trabajadores', dni, 'correcciones')),
+    obtenerAusenciasPeriodo(db, dni, new Date(1970, 0, 1), new Date(2100, 0, 1))
   ]);
 
   const construido = construirRegistrosConCadenas(fichajesSnap.docs, correccionesSnap.docs);
@@ -1290,7 +1319,7 @@ export async function obtenerDatosHistoricoCompleto(db, dni) {
     ? 'Histórico completo (del ' + registros[0].fecha + ' al ' + registros[registros.length - 1].fecha + ')'
     : 'Histórico completo (sin fichajes registrados)';
 
-  return { registros: registros, incidencias: incidencias, correcciones: correcciones, etiqueta: etiqueta };
+  return { registros: registros, incidencias: incidencias, correcciones: correcciones, etiqueta: etiqueta, ausencias: ausencias };
 }
 
 // ---------- AUDITORÍA DE DESCARGAS CERTIFICADAS ----------
