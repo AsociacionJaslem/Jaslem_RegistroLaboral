@@ -378,7 +378,7 @@ export async function obtenerMisRegistros(db, auth, mes, anio) {
 // y sincroniza su código de fichaje: borra la huella antigua (si la había)
 // y crea la nueva. Se usa tanto al aceptar la invitación por primera vez
 // como al recuperar un código olvidado.
-async function sincronizarCuentaYCodigo(auth, db, dni, codigoNuevo) {
+async function sincronizarCuentaYCodigo(auth, db, dni, codigoNuevo, email) {
   if (!codigoValido(codigoNuevo)) return { ok: false, mensaje: 'El código debe tener exactamente 6 dígitos.' };
   const uid = auth.currentUser.uid;
 
@@ -399,8 +399,15 @@ async function sincronizarCuentaYCodigo(auth, db, dni, codigoNuevo) {
 
   await updatePassword(auth.currentUser, codigoNuevo);
 
+  // Se guarda también el email (además del dni) en el propio documento del
+  // código: así, para entrar en "Mis registros", el trabajador solo
+  // necesita teclear su código — la app resuelve el email ella sola a
+  // partir de la huella del código, sin tener que pedírselo. Solo se puede
+  // llegar a leer este documento si ya se conoce el código en texto plano
+  // (hace falta para calcular su huella), así que no es una exposición
+  // nueva: es el mismo nivel de acceso que ya da conocer el código.
   const huellaNueva = await calcularHashCodigo(codigoNuevo);
-  await setDoc(doc(db, 'codigos_fichaje', huellaNueva), { dni: dni });
+  await setDoc(doc(db, 'codigos_fichaje', huellaNueva), { dni: dni, email: email || null });
   await updateDoc(doc(db, 'trabajadores_privado', dni), { hashCodigoActual: huellaNueva });
 
   // Solo ahora, con el código nuevo ya funcionando, se borra el antiguo —
@@ -413,8 +420,13 @@ async function sincronizarCuentaYCodigo(auth, db, dni, codigoNuevo) {
   return { ok: true };
 }
 
+// El enlace del correo (invitación o "he olvidado mi código") apunta a
+// "crear-codigo.html", una página aparte y mínima que SOLO sirve para
+// elegir el código de 6 dígitos — nunca a index.html (la aplicación de
+// fichar/Mis registros/Administración), que está pensada para la tablet
+// de la oficina, no para el móvil del trabajador.
 function enlaceInvitacion() {
-  const url = new URL(window.location.href);
+  const url = new URL('./crear-codigo.html', window.location.href);
   url.search = ''; url.hash = '';
   return { url: url.toString(), handleCodeInApp: true };
 }
@@ -446,7 +458,7 @@ export async function aceptarInvitacion(auth, db, email, dni, codigoNuevo) {
     return { ok: false, mensaje: 'El enlace no es válido o ha caducado. Pide al administrador que te mande uno nuevo.' };
   }
   const dniDigits = soloDigitos(dni);
-  const resultado = await sincronizarCuentaYCodigo(auth, db, dniDigits, codigoNuevo);
+  const resultado = await sincronizarCuentaYCodigo(auth, db, dniDigits, codigoNuevo, email);
   if (!resultado.ok) { await signOut(auth); return resultado; }
   await signOut(auth); // el kiosk no debe quedarse con nadie con la sesión abierta
   return { ok: true };
@@ -478,13 +490,15 @@ export async function confirmarNuevoCodigo(auth, db, oobCode, email, dni, codigo
     return { ok: false, mensaje: 'Tu código se ha cambiado, pero no se pudo terminar de guardar. Inténtalo otra vez.' };
   }
   const dniDigits = soloDigitos(dni);
-  const resultado = await sincronizarCuentaYCodigo(auth, db, dniDigits, codigoNuevo);
+  const resultado = await sincronizarCuentaYCodigo(auth, db, dniDigits, codigoNuevo, email);
   await signOut(auth);
   return resultado;
 }
 
 // Inicio de sesión del propio TRABAJADOR en "Mis registros" — con su email
-// y el código de 6 dígitos que él eligió (nunca con su DNI).
+// y el código de 6 dígitos que él eligió (nunca con su DNI). Se mantiene
+// por si algo más la usa, pero la pantalla de "Mis registros" ya usa
+// loginTrabajadorConCodigo (más abajo), que no pide el email.
 export async function loginTrabajador(auth, email, codigo) {
   if (!codigoValido(codigo)) return { ok: false, mensaje: 'El código debe tener 6 dígitos.' };
   try {
@@ -492,6 +506,27 @@ export async function loginTrabajador(auth, email, codigo) {
     return { ok: true };
   } catch (e) {
     return { ok: false, mensaje: 'Email o código incorrectos.' };
+  }
+}
+
+// Inicio de sesión del trabajador SOLO con su código de 6 dígitos (sin
+// pedirle el email): se busca su huella en "codigos_fichaje" (el mismo
+// documento que ya usa "Fichar" para reconocer el código), se recupera el
+// email que quedó guardado ahí al crear el código, y con eso se hace el
+// inicio de sesión real de Firebase por debajo — de forma transparente
+// para el trabajador. El email sigue existiendo por dentro (Firebase
+// Authentication lo necesita), pero el trabajador nunca tiene que
+// escribirlo para entrar en "Mis registros".
+export async function loginTrabajadorConCodigo(db, auth, codigo) {
+  if (!codigoValido(codigo)) return { ok: false, mensaje: 'El código debe tener 6 dígitos.' };
+  const huella = await calcularHashCodigo(codigo);
+  const snap = await getDoc(doc(db, 'codigos_fichaje', huella));
+  if (!snap.exists() || !snap.data().email) return { ok: false, mensaje: 'Código no reconocido.' };
+  try {
+    await signInWithEmailAndPassword(auth, snap.data().email, codigo);
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, mensaje: 'Código no reconocido.' };
   }
 }
 
@@ -1280,6 +1315,113 @@ export function calcularHorasTrabajadas(registros) {
   });
   const horas = Math.floor(totalMin / 60), min = totalMin % 60;
   return horas + 'h ' + String(min).padStart(2, '0') + 'min';
+}
+
+function minutosATexto_(totalMin) {
+  const horas = Math.floor(totalMin / 60), min = totalMin % 60;
+  return horas + 'h ' + String(min).padStart(2, '0') + 'min';
+}
+
+function diaSemanaDeDate_(d) {
+  return ['Domingo', 'Lunes', 'Martes', 'Miercoles', 'Jueves', 'Viernes', 'Sabado'][d.getDay()];
+}
+
+function minutosDeTramos_(tramos) {
+  return (tramos || []).reduce(function (total, t) {
+    const e = String(t.entrada || '').split(':').map(Number);
+    const s = String(t.salida || '').split(':').map(Number);
+    return total + Math.max(0, ((s[0] || 0) * 60 + (s[1] || 0)) - ((e[0] || 0) * 60 + (e[1] || 0)));
+  }, 0);
+}
+
+// ---------- HORAS DEBIDAS vs HORAS TRABAJADAS (para los informes) ----------
+// "Horas debidas en el periodo": la suma de las horas de su horario semanal
+// para cada día del periodo que sea laborable para él (tiene tramos
+// asignados ese día de la semana) y no sea un festivo/cierre de todo el
+// equipo. Es el objetivo — no depende de lo que hiciera ese día.
+//
+// "Horas trabajadas en el periodo": las horas realmente fichadas
+// (entrada/salida, ya con cualquier corrección aplicada) MÁS las horas
+// previstas de cada día en el que no fichó nada pero el motivo es un
+// permiso retribuido (vacaciones, baja médica, o cualquier motivo de
+// MOTIVOS_CORRECCION salvo "Falta de asistencia no justificada") — política
+// de la organización: eso cuenta como trabajado, así que iguala a las horas
+// debidas de ese día. Una falta no justificada, en cambio, no suma nada
+// ahí, así que se ve como un déficit frente a las horas debidas.
+export async function calcularHorasDebidasYTrabajadas(db, dni, inicio, fin, datosPeriodo) {
+  const horarioSnap = await getDoc(doc(db, 'horarios', dni));
+  const horarioSemanal = horarioSnap.exists() ? horarioSnap.data() : {};
+
+  const [festivosSnap, propiosSnap] = await Promise.all([
+    getDocs(query(collection(db, 'calendario'), where('tipo', '==', 'Festivo'))),
+    getDocs(query(collection(db, 'calendario'), where('trabajadorId', '==', dni)))
+  ]);
+  const festivosPorDia = {};
+  festivosSnap.forEach(function (d) {
+    const c = d.data();
+    if (fechaEnRango(c.fecha, inicio, fin)) festivosPorDia[c.fecha] = true;
+  });
+  const ausenciaPropiaPorDia = {};
+  propiosSnap.forEach(function (d) {
+    const c = d.data();
+    if (fechaEnRango(c.fecha, inicio, fin)) ausenciaPropiaPorDia[c.fecha] = c.tipo;
+  });
+
+  // Ausencias de un día concreto (sin fichaje ese día) ya resueltas por el
+  // administrador con un motivo — misma política que arriba.
+  const motivoAusenciaPuntualPorDia = {};
+  (datosPeriodo.correcciones || []).forEach(function (c) {
+    if (c.tipoRegistro === 'Ausencia' && c.fechaOriginal) motivoAusenciaPuntualPorDia[c.fechaOriginal] = c.motivo;
+  });
+
+  // 1) Horas realmente fichadas (timestampMs ya refleja el valor oficial).
+  let trabajadasMin = 0;
+  let entradaAbierta = null;
+  (datosPeriodo.registros || []).forEach(function (r) {
+    if (r.tipo === 'Entrada') {
+      entradaAbierta = r.timestampMs || null;
+    } else if (r.tipo === 'Salida' && entradaAbierta) {
+      if (r.timestampMs && r.timestampMs > entradaAbierta) trabajadasMin += Math.round((r.timestampMs - entradaAbierta) / 60000);
+      entradaAbierta = null;
+    }
+  });
+
+  // 2) Recorre cada día del periodo para las horas debidas y los permisos/faltas de día completo.
+  let debidasMin = 0;
+  const diasConFaltaNoJustificada = [];
+  // Se avanza día a día con setDate (nunca sumando milisegundos fijos), para
+  // que un periodo que incluya el cambio de hora de invierno/verano en
+  // Canarias no salte ni repita ningún día.
+  const finSinHora = new Date(fin.getFullYear(), fin.getMonth(), fin.getDate());
+  for (let d = new Date(inicio.getFullYear(), inicio.getMonth(), inicio.getDate()); d.getTime() <= finSinHora.getTime(); d.setDate(d.getDate() + 1)) {
+    const fechaStr = String(d.getDate()).padStart(2, '0') + '/' + String(d.getMonth() + 1).padStart(2, '0') + '/' + d.getFullYear();
+    if (festivosPorDia[fechaStr]) continue; // festivo de todo el equipo: no cuenta ni como debido
+
+    const diaSemana = diaSemanaDeDate_(d);
+    const claveDia = Object.keys(horarioSemanal || {}).find(function (k) { return normalizarDia(k) === normalizarDia(diaSemana); });
+    const tramos = obtenerTramosValidos(claveDia ? horarioSemanal[claveDia] : null);
+    if (tramos.length === 0) continue; // no es día laborable para este trabajador
+
+    const minutosDia = minutosDeTramos_(tramos);
+    debidasMin += minutosDia;
+
+    const tipoAusenciaPropia = ausenciaPropiaPorDia[fechaStr];
+    const motivoAusenciaPuntual = motivoAusenciaPuntualPorDia[fechaStr];
+
+    if (tipoAusenciaPropia) {
+      trabajadasMin += minutosDia; // vacaciones/baja/permiso planificado: cuenta como trabajado
+    } else if (motivoAusenciaPuntual && motivoAusenciaPuntual !== MOTIVO_NO_JUSTIFICADO) {
+      trabajadasMin += minutosDia; // ausencia puntual con motivo justificado: cuenta como trabajado
+    } else if (motivoAusenciaPuntual === MOTIVO_NO_JUSTIFICADO) {
+      diasConFaltaNoJustificada.push(fechaStr); // falta no justificada: no suma nada, queda el déficit
+    }
+  }
+
+  return {
+    debidasMin: debidasMin, trabajadasMin: trabajadasMin,
+    debidasTexto: minutosATexto_(debidasMin), trabajadasTexto: minutosATexto_(trabajadasMin),
+    diasConFaltaNoJustificada: diasConFaltaNoJustificada
+  };
 }
 
 // El estado de un registro ahora viene ya calculado (campo "estado") desde

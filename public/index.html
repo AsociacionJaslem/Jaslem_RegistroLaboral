@@ -239,7 +239,9 @@
     .tarjeta-pendiente.seleccionada { border-color: var(--verde-oscuro); background: var(--blanco); cursor: default; }
     .tarjeta-pendiente.deshabilitada { opacity: 0.4; pointer-events: none; cursor: default; }
     .cabecera-pendiente { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 4px; }
-    .nombre-pendiente { font-weight: 800; color: var(--texto); font-size: 13px; }
+    /* min-width:0 + ellipsis evita que un nombre de trabajador largo empuje
+       la etiqueta de estado fuera de la tarjeta en pantallas estrechas. */
+    .nombre-pendiente { font-weight: 800; color: var(--texto); font-size: 13px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .estado-pendiente-etiqueta { font-size: 10px; font-weight: 800; text-transform: uppercase; padding: 3px 8px; border-radius: 20px; white-space: nowrap; }
     .estado-no { background: #FBEAE8; color: var(--rojo-error); }
     .estado-ausencia { background: #EAF2FB; color: #2E5C8A; }
@@ -289,7 +291,12 @@
     .panel-admin-tab.activo { display: block; }
 
     /* ---------- GESTIÓN DE TRABAJADORES ---------- */
-    .tarjeta-trabajador { background: var(--fondo); border: 2px solid #E4EFED; border-radius: 12px; padding: 10px 14px; margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+    /* flex-wrap evita que, en pantallas más estrechas que un monitor de
+       sobremesa (una tablet en vertical, por ejemplo), los 3-4 botones de
+       cada fila se salgan por el lado — en vez de eso, pasan a una
+       segunda línea debajo del nombre del trabajador. */
+    .tarjeta-trabajador { background: var(--fondo); border: 2px solid #E4EFED; border-radius: 12px; padding: 10px 14px; margin-bottom: 8px; display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 10px; }
+    .tarjeta-trabajador .datos-trabajador-lista { flex: 1 1 200px; min-width: 180px; }
     .tarjeta-trabajador.inactivo { opacity: 0.55; border-style: dashed; }
     .datos-trabajador-lista { font-size: 12px; }
     .datos-trabajador-lista .nombre-tl { font-weight: 800; color: var(--texto); display: block; }
@@ -483,7 +490,7 @@
 
         <!-- VISTA FICHAR -->
         <div id="vista-fichar" class="panel activa">
-          <input type="password" inputmode="numeric" pattern="[0-9]*" maxlength="6" class="campo-pin" id="pin-fichar" placeholder="Código de 6 dígitos">
+          <input type="password" inputmode="numeric" pattern="[0-9]*" maxlength="6" class="campo-pin" id="pin-fichar" placeholder="Código">
           <div class="fila-botones">
             <button class="btn btn-entrada" id="btn-entrada" onclick="fichar('Entrada')">Entrada</button>
             <button class="btn btn-salida" id="btn-salida" onclick="fichar('Salida')">Salida</button>
@@ -508,13 +515,17 @@
             <button class="btn-cerrar-usuario" onclick="cerrarUsuarioMisRegistros()">Cerrar Usuario ✕</button>
           </div>
           <div id="consulta-login-campos">
-            <input type="email" class="campo-texto" id="consulta-email" placeholder="Tu email" autocomplete="username" style="margin-bottom:8px;">
             <input type="password" inputmode="numeric" pattern="[0-9]*" maxlength="6" class="campo-pin" id="pin-consulta" placeholder="Código de 6 dígitos">
           </div>
           <div class="selector-mes"><select id="select-mes"></select><select id="select-anio"></select></div>
           <button class="btn btn-consultar" onclick="consultar()">Ver mis registros</button>
           <div style="text-align:center;margin-top:10px;">
-            <a href="#" onclick="event.preventDefault(); solicitarRecuperacionCodigo();" style="font-size:13px;color:var(--verde-oscuro);">¿Has olvidado tu código?</a>
+            <a href="#" id="enlace-olvido-codigo" onclick="event.preventDefault(); solicitarRecuperacionCodigo();" style="font-size:13px;color:var(--verde-oscuro);">¿Has olvidado tu código?</a>
+          </div>
+          <div id="recuperacion-email-campos" style="display:none;margin-top:8px;">
+            <div style="font-size:12.5px;color:#52606d;margin-bottom:6px;">Escribe el email con el que recibiste la invitación — te mandaremos un enlace para elegir un código nuevo.</div>
+            <input type="email" class="campo-texto" id="recuperacion-email" placeholder="Tu email" autocomplete="username" style="margin-bottom:8px;">
+            <button class="btn btn-consultar" onclick="enviarRecuperacionCodigo()">Enviar enlace de recuperación</button>
           </div>
           <div id="resultado-consulta"></div>
         </div>
@@ -563,9 +574,9 @@
                 <label class="etiqueta-campo">Motivo</label>
                 <select class="campo-texto" id="correccion-admin-motivo"></select>
                 <label class="etiqueta-campo">Fecha correcta</label>
-                <input type="text" class="campo-texto" id="correccion-admin-fecha" placeholder="DD/MM/AAAA">
+                <input type="date" class="campo-texto" id="correccion-admin-fecha">
                 <label class="etiqueta-campo">Hora correcta</label>
-                <input type="text" class="campo-texto" id="correccion-admin-hora" placeholder="Ej: 08:00">
+                <input type="time" class="campo-texto" id="correccion-admin-hora">
                 <div class="fila-form-botones">
                   <button class="btn-enviar-correccion" onclick="enviarCorreccionAdmin()">Guardar corrección</button>
                   <button class="btn-cancelar-correccion" onclick="cancelarCorreccionAdmin()">Cancelar</button>
@@ -782,6 +793,22 @@
       'Paternidad'
     ];
     const MOTIVO_NO_JUSTIFICADO_TEXTO = 'Falta de asistencia no justificada';
+
+    // ---------- Selectores de fecha nativos (calendario del navegador) ----------
+    // El resto de la app guarda y espera las fechas en formato "DD/MM/AAAA",
+    // pero un <input type="date"> solo entiende "AAAA-MM-DD" en su .value.
+    // Estas dos funciones hacen de puente en los dos sentidos, para poder
+    // usar el selector de calendario sin tener que tocar el resto del código.
+    function ddmmaaaaAIso(fechaDDMMAAAA) {
+      const p = String(fechaDDMMAAAA || '').split('/');
+      if (p.length !== 3) return '';
+      return p[2] + '-' + p[1].padStart(2, '0') + '-' + p[0].padStart(2, '0');
+    }
+    function isoADdmmaaaa(fechaISO) {
+      const p = String(fechaISO || '').split('-');
+      if (p.length !== 3) return '';
+      return p[2] + '/' + p[1] + '/' + p[0];
+    }
 
     function rellenarSelectMotivos(idSelect) {
       const sel = document.getElementById(idSelect);
@@ -1220,16 +1247,15 @@
     // dígitos) — ya no basta con escribir un DNI para ver los datos de
     // cualquiera. El inicio de sesión y la consulta se hacen en un solo paso.
     function consultar() {
-      const email = document.getElementById('consulta-email').value.trim();
       const codigo = document.getElementById('pin-consulta').value.trim();
       const mes = document.getElementById('select-mes').value;
       const anio = document.getElementById('select-anio').value;
       const contenedor = document.getElementById('resultado-consulta');
-      if (!email || !codigo) { mostrarPopup('Faltan datos', 'Introduce tu email y tu código de 6 dígitos.', 'error'); return; }
+      if (!codigo) { mostrarPopup('Falta el código', 'Introduce tu código de 6 dígitos.', 'error'); return; }
       contenedor.innerHTML = '<div class="vacio">Cargando…</div>';
       mostrarCargando();
 
-      datosFirestore.loginTrabajador(auth, email, codigo)
+      datosFirestore.loginTrabajadorConCodigo(db, auth, codigo)
         .then(function (loginRes) {
           if (!loginRes.ok) { throw { manejado: true, mensaje: loginRes.mensaje }; }
           pinConsultaActual = codigo; // se sigue necesitando para "Solicitar corrección"
@@ -1253,14 +1279,23 @@
     }
 
     function solicitarRecuperacionCodigo() {
-      const email = document.getElementById('consulta-email').value.trim();
-      if (!email) { mostrarPopup('Falta el email', 'Escribe primero tu email en el campo de arriba.', 'error'); return; }
+      document.getElementById('recuperacion-email-campos').style.display = 'block';
+      document.getElementById('enlace-olvido-codigo').style.display = 'none';
+      document.getElementById('recuperacion-email').focus();
+    }
+
+    function enviarRecuperacionCodigo() {
+      const email = document.getElementById('recuperacion-email').value.trim();
+      if (!email) { mostrarPopup('Falta el email', 'Escribe tu email para poder enviarte el enlace.', 'error'); return; }
       mostrarConfirmacion('¿Recuperar código?', 'Te llegará un correo a ' + email + ' con un enlace para elegir un código nuevo. ¿Continuar?', function () {
         mostrarCargando();
         datosFirestore.solicitarRecuperarCodigo(auth, email)
           .then(function (res) {
             ocultarCargando();
             if (!res.ok) { mostrarPopup('No se pudo enviar', res.mensaje, 'error'); return; }
+            document.getElementById('recuperacion-email-campos').style.display = 'none';
+            document.getElementById('enlace-olvido-codigo').style.display = 'inline';
+            document.getElementById('recuperacion-email').value = '';
             mostrarPopup('Correo enviado', 'Revisa tu correo (' + email + ') y sigue el enlace para elegir un código nuevo.', 'ok');
           })
           .catch(function () { ocultarCargando(); mostrarPopup('Error de conexión', 'No se pudo enviar el correo.', 'error'); });
@@ -1443,10 +1478,12 @@
       // El kiosk nunca debe quedarse con la sesión de un trabajador abierta.
       if (auth.currentUser) { datosFirestore.logoutTrabajador(auth).catch(function () {}); }
       document.getElementById('pin-consulta').value = '';
-      document.getElementById('consulta-email').value = '';
       document.getElementById('consulta-login-campos').style.display = 'block';
       document.getElementById('resultado-consulta').innerHTML = '';
       document.getElementById('cabecera-mis-registros').style.display = 'none';
+      document.getElementById('recuperacion-email-campos').style.display = 'none';
+      document.getElementById('recuperacion-email').value = '';
+      document.getElementById('enlace-olvido-codigo').style.display = 'inline';
       ultimosRegistrosPropios = [];
       pinConsultaActual = '';
     }
@@ -1635,6 +1672,20 @@
           exp.style.display = 'block';
           exp.innerHTML = construirFormularioPendiente(pendientesActuales[idx], idx);
           rellenarSelectMotivos('motivo-pendiente-' + idx);
+          // El desplegable se rellena siempre en el mismo orden (alfabético),
+          // así que sin esto quedaba seleccionada su primera opción ("Baja
+          // médica") por defecto, sin importar qué motivo hubiera indicado
+          // el trabajador al pedir la corrección. Si el trabajador indicó un
+          // motivo válido, se preselecciona aquí para que el administrador
+          // vea ya marcado el motivo real solicitado (y pueda cambiarlo si
+          // no está de acuerdo).
+          (function () {
+            const motivoTrabajador = pendientesActuales[idx].motivoTrabajador;
+            const selMotivo = document.getElementById('motivo-pendiente-' + idx);
+            if (selMotivo && motivoTrabajador && MOTIVOS_CORRECCION.indexOf(motivoTrabajador) !== -1) {
+              selMotivo.value = motivoTrabajador;
+            }
+          })();
           aplicarPoliticaMotivoPendiente(idx);
         } else {
           item.classList.remove('seleccionada');
@@ -1732,9 +1783,9 @@
         const horaSugerida = obtenerHoraPrevistaSugerida(p);
         html +=
           '<label class="etiqueta-campo">Fecha correcta</label>' +
-          '<input type="text" class="campo-texto" id="fecha-pendiente-' + idx + '" value="' + p.fecha + '" placeholder="DD/MM/AAAA">' +
+          '<input type="date" class="campo-texto" id="fecha-pendiente-' + idx + '" value="' + ddmmaaaaAIso(p.fecha) + '">' +
           '<label class="etiqueta-campo">Hora correcta</label>' +
-          '<input type="text" class="campo-texto" id="hora-pendiente-' + idx + '" value="' + (p.hora !== '—' ? p.hora : '') + '" placeholder="Ej: 08:00">' +
+          '<input type="time" class="campo-texto" id="hora-pendiente-' + idx + '" value="' + (p.hora !== '—' ? p.hora : '') + '">' +
           '<div style="margin:6px 0 2px;">' +
           (horaSugerida ? '<button type="button" class="link-corregir" style="margin-right:12px;" onclick="usarHoraSugeridaPendiente(' + idx + ',\'' + horaSugerida + '\')">Usar la hora prevista (' + horaSugerida + ') — no descuenta</button>' : '') +
           '<button type="button" class="link-corregir" onclick="usarHoraRealPendiente(' + idx + ')">Mantener la hora real fichada' + (p.hora !== '—' ? ' (' + p.hora + ')' : '') + '</button>' +
@@ -1777,7 +1828,7 @@
         return;
       }
 
-      const fecha = document.getElementById('fecha-pendiente-' + idx).value.trim();
+      const fecha = isoADdmmaaaa(document.getElementById('fecha-pendiente-' + idx).value.trim());
       const hora = document.getElementById('hora-pendiente-' + idx).value.trim();
       if (!p.fichajeId) { ocultarCargando(); mostrarPopup('No se pudo corregir', 'Este registro no tiene un identificador válido (dato antiguo). Corrígelo desde la búsqueda manual.', 'error'); return; }
       if (!fecha || !hora) { ocultarCargando(); mostrarPopup('Faltan datos', 'Indica la fecha y la hora correctas.', 'error'); return; }
@@ -1812,7 +1863,7 @@
             function abrirFormularioCorreccion() {
               filaCorreccionAdminActual = registro;
               rellenarSelectMotivos('correccion-admin-motivo');
-              document.getElementById('correccion-admin-fecha').value = (registro.oficial && registro.oficial.fecha) || registro.fecha;
+              document.getElementById('correccion-admin-fecha').value = ddmmaaaaAIso((registro.oficial && registro.oficial.fecha) || registro.fecha);
               document.getElementById('correccion-admin-hora').value = ((registro.oficial && registro.oficial.hora) || registro.hora).slice(0, 5);
               document.getElementById('form-correccion-admin').classList.add('activo');
             }
@@ -1846,7 +1897,7 @@
       if (!filaCorreccionAdminActual) return;
       const dniObjetivo = document.getElementById('dni-objetivo-admin').value.trim();
       const motivo = document.getElementById('correccion-admin-motivo').value.trim();
-      const fecha = document.getElementById('correccion-admin-fecha').value.trim();
+      const fecha = isoADdmmaaaa(document.getElementById('correccion-admin-fecha').value.trim());
       const hora = document.getElementById('correccion-admin-hora').value.trim();
       if (!motivo) { mostrarPopup('Falta el motivo', 'Explica brevemente por qué este registro es incorrecto.', 'error'); return; }
       if (!fecha || !hora) { mostrarPopup('Faltan datos', 'Indica la fecha y la hora correctas.', 'error'); return; }

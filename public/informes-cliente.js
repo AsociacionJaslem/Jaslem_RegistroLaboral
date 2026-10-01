@@ -34,7 +34,7 @@
 
 import {
   calcularPeriodo, obtenerDatosPeriodo, obtenerDatosHistoricoCompleto,
-  obtenerTrabajadorCompleto, calcularHorasTrabajadas, estadoDeRegistro,
+  obtenerTrabajadorCompleto, calcularHorasTrabajadas, calcularHorasDebidasYTrabajadas, estadoDeRegistro,
   registrarDescargaCertificada
 } from './firestore-datos.js';
 import { calcularHuellaTexto, formatearCodigoVerificacion, formatearFecha, formatearHoraCompleta } from './logica-comun.js';
@@ -105,20 +105,30 @@ function formatearRangoAusencia_(r) {
   return (r.inicio === r.fin) ? r.inicio : (r.inicio + ' – ' + r.fin);
 }
 
+function minutosATexto(totalMin) {
+  const m = Math.max(0, totalMin);
+  const horas = Math.floor(m / 60), min = m % 60;
+  return horas + 'h ' + String(min).padStart(2, '0') + 'min';
+}
+
 // opciones: { proteger: true|false (por defecto true), password: 'xxxx' (opcional, si no se indica se genera una) }
 export async function generarInformeCliente(db, auth, logoBase64, dni, tipoPeriodo, fechaReferenciaISO, formato, opciones) {
   const opts = opciones || {};
   const trabajador = await obtenerTrabajadorCompleto(db, dni);
   if (!trabajador) return { ok: false, mensaje: 'No se encontró ningún trabajador con ese DNI/NIE.' };
 
-  let periodo, datosPeriodo;
+  let periodo, datosPeriodo, resumenHoras = null;
   if (tipoPeriodo === 'historico_completo') {
     datosPeriodo = await obtenerDatosHistoricoCompleto(db, trabajador.dni);
     periodo = { etiqueta: datosPeriodo.etiqueta };
+    // No se calculan "horas debidas" en el histórico completo: puede
+    // abarcar años con horarios distintos y festivos de sobra sin
+    // descargar — aquí solo se informa de lo realmente fichado.
   } else {
     periodo = calcularPeriodo(tipoPeriodo, fechaReferenciaISO);
     if (!periodo) return { ok: false, mensaje: 'Tipo de periodo no válido.' };
     datosPeriodo = await obtenerDatosPeriodo(db, trabajador.dni, periodo.inicio, periodo.fin);
+    resumenHoras = await calcularHorasDebidasYTrabajadas(db, trabajador.dni, periodo.inicio, periodo.fin, datosPeriodo);
   }
 
   const ahora = new Date();
@@ -133,10 +143,10 @@ export async function generarInformeCliente(db, auth, logoBase64, dni, tipoPerio
 
   let blobSinCifrar, nombreDentro;
   if (formato === 'pdf') {
-    blobSinCifrar = generarPdf(logoBase64, trabajador, periodo, datosPeriodo, certificacion);
+    blobSinCifrar = generarPdf(logoBase64, trabajador, periodo, datosPeriodo, certificacion, resumenHoras);
     nombreDentro = nombreArchivoBase + '.pdf';
   } else {
-    blobSinCifrar = generarExcel(trabajador, periodo, datosPeriodo, certificacion);
+    blobSinCifrar = generarExcel(trabajador, periodo, datosPeriodo, certificacion, resumenHoras);
     nombreDentro = nombreArchivoBase + '.xlsx';
   }
 
@@ -161,7 +171,7 @@ export async function generarInformeCliente(db, auth, logoBase64, dni, tipoPerio
   };
 }
 
-function generarPdf(logoBase64, trabajador, periodo, datos, certificacion) {
+function generarPdf(logoBase64, trabajador, periodo, datos, certificacion, resumenHoras) {
   const jsPDFCtor = window.jspdf.jsPDF;
   const pdf = new jsPDFCtor({ unit: 'pt', format: 'a4' });
 
@@ -195,8 +205,31 @@ function generarPdf(logoBase64, trabajador, periodo, datos, certificacion) {
   pdf.text('DNI/NIE: ' + trabajador.dni + (trabajador.categoria ? '   ·   Categoría profesional: ' + trabajador.categoria : ''), 40, 134);
   if (trabajador.nss) pdf.text('Nº Seguridad Social: ' + trabajador.nss, 40, 148);
 
-  pdf.setFont('helvetica', 'bold');
-  pdf.text('Horas trabajadas en el periodo: ' + calcularHorasTrabajadas(datos.registros), 40, 166);
+  // "Horas debidas" (lo que tocaba trabajar según su horario, sin contar
+  // festivos) y "Horas trabajadas" (lo realmente fichado, más los permisos
+  // retribuidos que cuentan como trabajados — ver calcularHorasDebidasYTrabajadas).
+  // En el histórico completo no se calculan horas debidas (puede abarcar
+  // años con horarios distintos), así que ahí solo se muestra lo fichado.
+  let yHoras = 166;
+  pdf.setFont('helvetica', 'bold'); pdf.setFontSize(10);
+  if (resumenHoras) {
+    pdf.text('Horas debidas en el periodo: ' + resumenHoras.debidasTexto, 40, yHoras);
+    yHoras += 14;
+    pdf.text('Horas trabajadas en el periodo: ' + resumenHoras.trabajadasTexto, 40, yHoras);
+    if (resumenHoras.trabajadasMin < resumenHoras.debidasMin) {
+      yHoras += 13;
+      pdf.setFont('helvetica', 'normal'); pdf.setFontSize(8.5);
+      pdf.setTextColor.apply(pdf, COLORES_ESTADO['Pendiente']);
+      const diasTexto = resumenHoras.diasConFaltaNoJustificada.length
+        ? ' (incluye falta de asistencia no justificada el ' + resumenHoras.diasConFaltaNoJustificada.join(', ') + ')'
+        : '';
+      pdf.text('Diferencia: ' + minutosATexto(resumenHoras.debidasMin - resumenHoras.trabajadasMin) + diasTexto, 40, yHoras);
+      pdf.setTextColor.apply(pdf, COLOR_TEXTO);
+    }
+  } else {
+    pdf.text('Horas trabajadas en el periodo: ' + calcularHorasTrabajadas(datos.registros), 40, yHoras);
+  }
+  const startYTabla = yHoras + 22;
 
   // Cada fichaje en su fila normal; si tiene alguna corrección (la pidiera
   // el trabajador o la certificara el administrador, sea o no un motivo
@@ -218,7 +251,7 @@ function generarPdf(logoBase64, trabajador, periodo, datos, certificacion) {
   });
 
   pdf.autoTable({
-    startY: 180,
+    startY: startYTabla,
     head: [['Fecha', 'Hora', 'Tipo', 'Estado', 'Detalle']],
     body: filas.length ? filas : [['—', '—', '—', 'Sin fichajes en este periodo', '']],
     margin: { left: 40, right: 40 },
@@ -340,12 +373,23 @@ function generarPdf(logoBase64, trabajador, periodo, datos, certificacion) {
   return pdf.output('blob');
 }
 
-function generarExcel(trabajador, periodo, datos, certificacion) {
+function generarExcel(trabajador, periodo, datos, certificacion, resumenHoras) {
   const filas = [
     [NOMBRE_ORGANIZACION + ' — Informe de ' + periodo.etiqueta],
-    ['Trabajador: ' + trabajador.nombre + '   DNI/NIE: ' + trabajador.dni + (trabajador.categoria ? '   Categoría: ' + trabajador.categoria : '')],
-    ['Horas trabajadas en el periodo: ' + calcularHorasTrabajadas(datos.registros)]
+    ['Trabajador: ' + trabajador.nombre + '   DNI/NIE: ' + trabajador.dni + (trabajador.categoria ? '   Categoría: ' + trabajador.categoria : '')]
   ];
+  if (resumenHoras) {
+    filas.push(['Horas debidas en el periodo: ' + resumenHoras.debidasTexto]);
+    filas.push(['Horas trabajadas en el periodo: ' + resumenHoras.trabajadasTexto]);
+    if (resumenHoras.trabajadasMin < resumenHoras.debidasMin) {
+      const diasTexto = resumenHoras.diasConFaltaNoJustificada.length
+        ? ' (incluye falta de asistencia no justificada el ' + resumenHoras.diasConFaltaNoJustificada.join(', ') + ')'
+        : '';
+      filas.push(['Diferencia: ' + minutosATexto(resumenHoras.debidasMin - resumenHoras.trabajadasMin) + diasTexto]);
+    }
+  } else {
+    filas.push(['Horas trabajadas en el periodo: ' + calcularHorasTrabajadas(datos.registros)]);
+  }
   filas.push([], ['Fecha', 'Hora', 'Tipo', 'Estado', 'Detalle']);
   // Cada fichaje en su fila normal; sus correcciones (si tiene) van justo
   // debajo, en su propia fila, nunca en un bloque aparte al final.
