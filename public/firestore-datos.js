@@ -468,6 +468,7 @@ export async function aceptarInvitacion(auth, db, email, dni, codigoNuevo) {
 // administrador tenga que hacer nada.
 export async function solicitarRecuperarCodigo(auth, email) {
   try {
+    auth.languageCode = 'es'; // El correo que envía Firebase debe salir en español
     await sendPasswordResetEmail(auth, email, enlaceInvitacion());
     return { ok: true };
   } catch (e) {
