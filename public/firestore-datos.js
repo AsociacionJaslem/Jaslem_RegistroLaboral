@@ -512,7 +512,10 @@ export async function solicitarRecuperarCodigo(auth, email) {
     window.localStorage.setItem('jaslem_email_invitacion', email);
     return { ok: true };
   } catch (e) {
-    return { ok: false, mensaje: 'No se pudo enviar el correo. Comprueba el email.' };
+    // Diagnóstico temporal: se muestra el código real del error (p.ej.
+    // "auth/missing-email", "auth/invalid-email", "auth/unauthorized-continue-uri")
+    // en vez de ocultarlo, mientras se depura este fallo nuevo.
+    return { ok: false, mensaje: 'No se pudo enviar el correo. Comprueba el email. [' + (e.code || e.message) + ']' };
   }
 }
 
