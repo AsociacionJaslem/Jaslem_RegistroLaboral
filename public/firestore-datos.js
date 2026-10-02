@@ -388,15 +388,6 @@ async function sincronizarCuentaYCodigo(auth, db, dni, codigoNuevo, email) {
   try { await updateDoc(doc(db, 'trabajadores_privado', dni), { uid: uid }); } catch (e) { /* ya estaba vinculado */ }
   try { await setDoc(doc(db, 'uid_a_dni', uid), { dni: dni }); } catch (e) { /* ya existía */ }
 
-  // Averiguar si ya tenía un código anterior, para borrar su huella antigua
-  // DESPUÉS de crear la nueva — así nunca hay una ventana en la que el
-  // trabajador se quede sin ningún código válido si algo falla a mitad.
-  let huellaAntigua = null;
-  try {
-    const privSnapAntes = await getDoc(doc(db, 'trabajadores_privado', dni));
-    huellaAntigua = privSnapAntes.exists() ? (privSnapAntes.data().hashCodigoActual || null) : null;
-  } catch (e) { /* si no se puede leer, simplemente no se borra nada antiguo */ }
-
   await updatePassword(auth.currentUser, codigoNuevo);
 
   // Se guarda también el email (además del dni) en el propio documento del
@@ -408,14 +399,24 @@ async function sincronizarCuentaYCodigo(auth, db, dni, codigoNuevo, email) {
   // nueva: es el mismo nivel de acceso que ya da conocer el código.
   const huellaNueva = await calcularHashCodigo(codigoNuevo);
   await setDoc(doc(db, 'codigos_fichaje', huellaNueva), { dni: dni, email: email || null });
-  await updateDoc(doc(db, 'trabajadores_privado', dni), { hashCodigoActual: huellaNueva });
+  try { await updateDoc(doc(db, 'trabajadores_privado', dni), { hashCodigoActual: huellaNueva }); } catch (e) { /* no crítico: solo es un apunte informativo */ }
 
-  // Solo ahora, con el código nuevo ya funcionando, se borra el antiguo —
-  // así el código viejo deja de servir para fichar (no puede quedar activo
-  // a la vez que el nuevo).
-  if (huellaAntigua && huellaAntigua !== huellaNueva) {
-    try { await deleteDoc(doc(db, 'codigos_fichaje', huellaAntigua)); } catch (e) { /* no pasa nada si ya no existía */ }
-  }
+  // Solo ahora, con el código nuevo ya funcionando, se buscan y se borran
+  // TODOS los códigos antiguos de este mismo trabajador (puede haber más de
+  // uno, por ejemplo si una recuperación anterior falló a mitad) — así
+  // ningún código viejo se queda activo a la vez que el nuevo. Se busca
+  // directamente en "codigos_fichaje" por el dni, en vez de fiarse de un
+  // único apunte guardado en trabajadores_privado (ese apunte puede faltar
+  // o estar desactualizado, y antes eso hacía que el código viejo nunca se
+  // borrara).
+  try {
+    const antiguosSnap = await getDocs(query(collection(db, 'codigos_fichaje'), where('dni', '==', dni)));
+    for (const d of antiguosSnap.docs) {
+      if (d.id !== huellaNueva) {
+        try { await deleteDoc(doc(db, 'codigos_fichaje', d.id)); } catch (e) { /* no pasa nada si ya no existía */ }
+      }
+    }
+  } catch (e) { /* si la búsqueda falla, el código nuevo ya funciona igualmente */ }
 
   return { ok: true };
 }
