@@ -402,12 +402,17 @@ async function sincronizarCuentaYCodigo(auth, db, dni, codigoNuevo, email) {
   // código que ya tenía (misma huella = mismo documento), intentar volver
   // a guardarlo se interpreta como una modificación de un documento ya
   // existente, y las reglas de seguridad lo rechazan (permission-denied).
-  // Por eso se comprueba antes si ya existe exactamente ese documento, y
-  // solo se crea si de verdad es nuevo.
-  const yaExistiaIgual = (await getDoc(doc(db, 'codigos_fichaje', huellaNueva))).exists();
-  if (!yaExistiaIgual) {
-    await setDoc(doc(db, 'codigos_fichaje', huellaNueva), { dni: dni, email: email || null });
+  // Por eso, si ya existe ese documento, se borra primero y se vuelve a
+  // crear desde cero con los datos correctos (nunca se deja "tal cual" un
+  // documento existente: uno antiguo podía haberse creado sin el campo
+  // "email", de una versión anterior de esta función, y entonces "Mis
+  // registros" nunca lo encontraba).
+  const refCodigoNuevo = doc(db, 'codigos_fichaje', huellaNueva);
+  const yaExistiaIgual = (await getDoc(refCodigoNuevo)).exists();
+  if (yaExistiaIgual) {
+    try { await deleteDoc(refCodigoNuevo); } catch (e) { /* si no se puede borrar, se intenta crear igualmente */ }
   }
+  await setDoc(refCodigoNuevo, { dni: dni, email: email || null });
   try { await updateDoc(doc(db, 'trabajadores_privado', dni), { hashCodigoActual: huellaNueva }); } catch (e) { /* no crítico: solo es un apunte informativo */ }
 
   // Solo ahora, con el código nuevo ya funcionando, se buscan y se borran
