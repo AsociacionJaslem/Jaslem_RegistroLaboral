@@ -539,13 +539,22 @@ export async function loginTrabajador(auth, email, codigo) {
 export async function loginTrabajadorConCodigo(db, auth, codigo) {
   if (!codigoValido(codigo)) return { ok: false, mensaje: 'El código debe tener 6 dígitos.' };
   const huella = await calcularHashCodigo(codigo);
-  const snap = await getDoc(doc(db, 'codigos_fichaje', huella));
-  if (!snap.exists() || !snap.data().email) return { ok: false, mensaje: 'Código no reconocido.' };
+  let snap;
+  try {
+    snap = await getDoc(doc(db, 'codigos_fichaje', huella));
+  } catch (e) {
+    // Diagnóstico temporal: se muestra el código real del error (p.ej.
+    // "permission-denied") en vez de ocultarlo, mientras se depura el
+    // fallo de "Mis registros" tras recuperar código.
+    return { ok: false, mensaje: 'Código no reconocido. [lectura: ' + (e.code || e.message) + ']' };
+  }
+  if (!snap.exists()) return { ok: false, mensaje: 'Código no reconocido. [sin documento para esa huella]' };
+  if (!snap.data().email) return { ok: false, mensaje: 'Código no reconocido. [documento sin email guardado]' };
   try {
     await signInWithEmailAndPassword(auth, snap.data().email, codigo);
     return { ok: true };
   } catch (e) {
-    return { ok: false, mensaje: 'Código no reconocido.' };
+    return { ok: false, mensaje: 'Código no reconocido. [acceso: ' + (e.code || e.message) + ' / email: ' + snap.data().email + ']' };
   }
 }
 
