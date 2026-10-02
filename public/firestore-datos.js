@@ -431,6 +431,22 @@ function enlaceInvitacion() {
   return { url: url.toString(), handleCodeInApp: true };
 }
 
+// Enlace para "he olvidado mi código". Usa el MISMO mecanismo que la
+// invitación (signInWithEmailLink), no el de "restablecer contraseña" de
+// Firebase: ese segundo tipo de correo SIEMPRE abre primero una pantalla
+// genérica de Firebase (fuera de nuestro control, en inglés salvo que el
+// proyecto la tenga traducida, y que no sabe nada de nuestro código de 6
+// dígitos) antes de redirigir — en la práctica, nunca llega a nuestra
+// página con el código intacto. El enlace de "signIn" sí va siempre
+// directo a nuestra página, así que reutilizamos ese mismo camino, que es
+// exactamente igual de seguro (la comprobación real está en
+// sincronizarCuentaYCodigo, idéntica para ambos casos).
+function enlaceRecuperacion() {
+  const url = new URL('./crear-codigo.html', window.location.href);
+  url.search = '?origen=recuperacion'; url.hash = '';
+  return { url: url.toString(), handleCodeInApp: true };
+}
+
 // La manda el ADMINISTRADOR, cuando él quiere — nunca en automático.
 export async function enviarInvitacionTrabajador(auth, db, dni) {
   if (!auth.currentUser) return { ok: false, mensaje: 'Tu sesión ha caducado. Vuelve a identificarte.' };
@@ -465,11 +481,13 @@ export async function aceptarInvitacion(auth, db, email, dni, codigoNuevo) {
 }
 
 // "He olvidado mi código" — lo pide el propio trabajador, sin que el
-// administrador tenga que hacer nada.
+// administrador tenga que hacer nada. Usa el enlace de tipo "invitación"
+// (ver enlaceRecuperacion arriba) para que vaya directo a crear-codigo.html.
 export async function solicitarRecuperarCodigo(auth, email) {
   try {
     auth.languageCode = 'es'; // El correo que envía Firebase debe salir en español
-    await sendPasswordResetEmail(auth, email, enlaceInvitacion());
+    await sendSignInLinkToEmail(auth, email, enlaceRecuperacion());
+    window.localStorage.setItem('jaslem_email_invitacion', email);
     return { ok: true };
   } catch (e) {
     return { ok: false, mensaje: 'No se pudo enviar el correo. Comprueba el email.' };

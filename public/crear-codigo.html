@@ -119,7 +119,18 @@
       modoAcceso = 'invitacion';
       const emailGuardado = window.localStorage.getItem('jaslem_email_invitacion') || '';
       if (emailGuardado) document.getElementById('email').value = emailGuardado;
+      // "He olvidado mi código" usa este mismo tipo de enlace (ver
+      // firestore-datos.js, enlaceRecuperacion) — solo cambia el texto.
+      if (parametros.get('origen') === 'recuperacion') {
+        document.getElementById('titulo').textContent = 'Recupera tu código de acceso';
+        document.getElementById('aviso-intro').innerHTML =
+          'Elige un código nuevo de 6 dígitos. El anterior dejará de funcionar en cuanto lo confirmes. ' +
+          'Este enlace no abre la aplicación de fichar — esa está en la tablet de la oficina.';
+      }
     } else if (modo === 'resetPassword' && parametros.get('oobCode')) {
+      // Ya no se genera ningún enlace de este tipo (ver enlaceRecuperacion
+      // en firestore-datos.js) — se deja por compatibilidad, por si queda
+      // algún correo antiguo sin usar.
       modoAcceso = 'recuperacion';
       oobCode = parametros.get('oobCode');
       document.getElementById('titulo').textContent = 'Recupera tu código de acceso';
