@@ -1393,27 +1393,38 @@ function minutosDeTramos_(tramos) {
 }
 
 // ---------- HORAS DEBIDAS vs HORAS TRABAJADAS (para los informes) ----------
-// "Horas debidas en el periodo": la suma de las horas de su horario semanal
-// para cada día del periodo que sea laborable para él (tiene tramos
-// asignados ese día de la semana) y no sea un festivo/cierre de todo el
-// equipo. Es el objetivo — no depende de lo que hiciera ese día.
+// Se calculan POR SEPARADO la parte PRESENCIAL y la parte de TELETRABAJO
+// del trabajador (un perfil "mixta" tiene las dos a la vez):
 //
-// "Horas trabajadas en el periodo": las horas realmente fichadas
-// (entrada/salida, ya con cualquier corrección aplicada) MÁS las horas
-// previstas de cada día en el que no fichó nada pero el motivo es un
-// permiso retribuido (vacaciones, baja médica, o cualquier motivo de
-// MOTIVOS_CORRECCION salvo "Falta de asistencia no justificada") — política
-// de la organización: eso cuenta como trabajado, así que iguala a las horas
-// debidas de ese día. Una falta no justificada, en cambio, no suma nada
-// ahí, así que se ve como un déficit frente a las horas debidas.
+// - PRESENCIAL: "horas debidas" = la suma de los tramos de su horario
+//   semanal en cada día del periodo que le toque ir presencialmente (tiene
+//   tramos asignados ese día de la semana) y no sea festivo/cierre de todo
+//   el equipo. "Horas trabajadas" = lo realmente fichado esos días.
+//
+// - TELETRABAJO: no hay tramos (ficha libremente) — "horas debidas" de
+//   CADA día de teletrabajo es su objetivo semanal repartido entre los
+//   días de teletrabajo de la semana (÷5 si es teletrabajo al 100%, ÷nº de
+//   días marcados como teletrabajo si es "mixta"). Al sumar día a día TODO
+//   el periodo (sin cortar por semanas), una semana floja y otra cargada
+//   se compensan solas en el total — si una semana trabaja 5h de menos y
+//   la siguiente 5h de más, el cómputo del mes sale exacto igual.
+//
+// En ambos casos, un día de permiso retribuido (vacaciones, baja médica, o
+// cualquier motivo de MOTIVOS_CORRECCION salvo "Falta de asistencia no
+// justificada") cuenta como trabajado (iguala a lo debido ese día); una
+// falta no justificada no suma nada, y queda como déficit frente a lo debido.
 export async function calcularHorasDebidasYTrabajadas(db, dni, inicio, fin, datosPeriodo) {
-  const horarioSnap = await getDoc(doc(db, 'horarios', dni));
-  const horarioSemanal = horarioSnap.exists() ? horarioSnap.data() : {};
-
-  const [festivosSnap, propiosSnap] = await Promise.all([
+  const [trabajadorSnap, horarioSnap, festivosSnap, propiosSnap] = await Promise.all([
+    getDoc(doc(db, 'trabajadores', dni)),
+    getDoc(doc(db, 'horarios', dni)),
     getDocs(query(collection(db, 'calendario'), where('tipo', '==', 'Festivo'))),
     getDocs(query(collection(db, 'calendario'), where('trabajadorId', '==', dni)))
   ]);
+  const trabajador = trabajadorSnap.exists() ? mapearTrabajador(dni, trabajadorSnap.data()) : null;
+  const horarioSemanal = horarioSnap.exists() ? horarioSnap.data() : {};
+  const perfilTrabajo = trabajador ? trabajador.perfilTrabajo : 'presencial';
+  const horasSemanalesTeletrabajo = trabajador ? (Number(trabajador.horasSemanalesTeletrabajo) || 0) : 0;
+
   const festivosPorDia = {};
   festivosSnap.forEach(function (d) {
     const c = d.data();
@@ -1432,53 +1443,101 @@ export async function calcularHorasDebidasYTrabajadas(db, dni, inicio, fin, dato
     if (c.tipoRegistro === 'Ausencia' && c.fechaOriginal) motivoAusenciaPuntualPorDia[c.fechaOriginal] = c.motivo;
   });
 
-  // 1) Horas realmente fichadas (timestampMs ya refleja el valor oficial).
-  let trabajadasMin = 0;
-  let entradaAbierta = null;
+  // Minutos realmente fichados, agrupados por el día en que empezó cada
+  // turno (timestampMs ya refleja el valor oficial, con correcciones
+  // aplicadas) — para poder repartirlos entre presencial/teletrabajo según
+  // qué modalidad tocaba ESE día concreto.
+  const minutosPorDia = {};
+  let entradaAbierta = null, fechaEntradaAbierta = null;
   (datosPeriodo.registros || []).forEach(function (r) {
     if (r.tipo === 'Entrada') {
-      entradaAbierta = r.timestampMs || null;
+      entradaAbierta = r.timestampMs || null; fechaEntradaAbierta = r.fecha;
     } else if (r.tipo === 'Salida' && entradaAbierta) {
-      if (r.timestampMs && r.timestampMs > entradaAbierta) trabajadasMin += Math.round((r.timestampMs - entradaAbierta) / 60000);
-      entradaAbierta = null;
+      if (r.timestampMs && r.timestampMs > entradaAbierta) {
+        const clave = fechaEntradaAbierta || r.fecha;
+        minutosPorDia[clave] = (minutosPorDia[clave] || 0) + Math.round((r.timestampMs - entradaAbierta) / 60000);
+      }
+      entradaAbierta = null; fechaEntradaAbierta = null;
     }
   });
 
-  // 2) Recorre cada día del periodo para las horas debidas y los permisos/faltas de día completo.
-  let debidasMin = 0;
-  const diasConFaltaNoJustificada = [];
+  // Nº de días de teletrabajo a la semana, para repartir el objetivo
+  // semanal entre ellos: los 5 días laborables (lunes-viernes) si es
+  // teletrabajo al 100%, o solo los días que marca su horario si es "mixta".
+  let diasTeletrabajoPorSemana = 5;
+  if (perfilTrabajo === 'mixta') {
+    diasTeletrabajoPorSemana = Object.keys(horarioSemanal || {}).filter(function (k) {
+      return horarioSemanal[k] && horarioSemanal[k].modalidad === 'teletrabajo';
+    }).length || 1;
+  }
+  const debidoTeletrabajoDiaMin = (horasSemanalesTeletrabajo * 60) / diasTeletrabajoPorSemana;
+
+  const pres = { debidasMin: 0, trabajadasMin: 0, diasConFaltaNoJustificada: [] };
+  const tele = { debidasMin: 0, trabajadasMin: 0, diasConFaltaNoJustificada: [] };
+
   // Se avanza día a día con setDate (nunca sumando milisegundos fijos), para
   // que un periodo que incluya el cambio de hora de invierno/verano en
   // Canarias no salte ni repita ningún día.
   const finSinHora = new Date(fin.getFullYear(), fin.getMonth(), fin.getDate());
   for (let d = new Date(inicio.getFullYear(), inicio.getMonth(), inicio.getDate()); d.getTime() <= finSinHora.getTime(); d.setDate(d.getDate() + 1)) {
     const fechaStr = String(d.getDate()).padStart(2, '0') + '/' + String(d.getMonth() + 1).padStart(2, '0') + '/' + d.getFullYear();
-    if (festivosPorDia[fechaStr]) continue; // festivo de todo el equipo: no cuenta ni como debido
+    if (festivosPorDia[fechaStr]) continue; // festivo de todo el equipo: no cuenta en ningún lado
 
+    const esDiaTeletrabajo = perfilTrabajo === 'teletrabajo'
+      ? (d.getDay() !== 0 && d.getDay() !== 6) // 100% teletrabajo: cualquier día laborable (lunes-viernes)
+      : diaCuentaComoTeletrabajo(perfilTrabajo, horarioSemanal, d); // "mixta": solo sus días marcados como tal
+
+    const tipoAusenciaPropia = ausenciaPropiaPorDia[fechaStr];
+    const motivoAusenciaPuntual = motivoAusenciaPuntualPorDia[fechaStr];
+    const minutosFichadosDia = minutosPorDia[fechaStr] || 0;
+
+    if (esDiaTeletrabajo) {
+      tele.debidasMin += debidoTeletrabajoDiaMin;
+      if (tipoAusenciaPropia || (motivoAusenciaPuntual && motivoAusenciaPuntual !== MOTIVO_NO_JUSTIFICADO)) {
+        tele.trabajadasMin += debidoTeletrabajoDiaMin; // permiso retribuido: cuenta como trabajado
+      } else if (motivoAusenciaPuntual === MOTIVO_NO_JUSTIFICADO) {
+        tele.diasConFaltaNoJustificada.push(fechaStr); // falta no justificada: queda el déficit
+      } else {
+        tele.trabajadasMin += minutosFichadosDia;
+      }
+      continue;
+    }
+
+    // Día presencial (o, en un "mixta", su día presencial de la semana):
+    // "debido" según su horario de tramos, igual que siempre.
     const diaSemana = diaSemanaDeDate_(d);
     const claveDia = Object.keys(horarioSemanal || {}).find(function (k) { return normalizarDia(k) === normalizarDia(diaSemana); });
     const tramos = obtenerTramosValidos(claveDia ? horarioSemanal[claveDia] : null);
     if (tramos.length === 0) continue; // no es día laborable para este trabajador
 
     const minutosDia = minutosDeTramos_(tramos);
-    debidasMin += minutosDia;
-
-    const tipoAusenciaPropia = ausenciaPropiaPorDia[fechaStr];
-    const motivoAusenciaPuntual = motivoAusenciaPuntualPorDia[fechaStr];
-
-    if (tipoAusenciaPropia) {
-      trabajadasMin += minutosDia; // vacaciones/baja/permiso planificado: cuenta como trabajado
-    } else if (motivoAusenciaPuntual && motivoAusenciaPuntual !== MOTIVO_NO_JUSTIFICADO) {
-      trabajadasMin += minutosDia; // ausencia puntual con motivo justificado: cuenta como trabajado
+    pres.debidasMin += minutosDia;
+    if (tipoAusenciaPropia || (motivoAusenciaPuntual && motivoAusenciaPuntual !== MOTIVO_NO_JUSTIFICADO)) {
+      pres.trabajadasMin += minutosDia; // permiso retribuido: cuenta como trabajado
     } else if (motivoAusenciaPuntual === MOTIVO_NO_JUSTIFICADO) {
-      diasConFaltaNoJustificada.push(fechaStr); // falta no justificada: no suma nada, queda el déficit
+      pres.diasConFaltaNoJustificada.push(fechaStr); // falta no justificada: queda el déficit
+    } else {
+      pres.trabajadasMin += minutosFichadosDia;
     }
   }
 
+  const aplicaTeletrabajo = (perfilTrabajo === 'teletrabajo' || perfilTrabajo === 'mixta') && horasSemanalesTeletrabajo > 0;
+  const aplicaPresencial = perfilTrabajo !== 'teletrabajo';
+  const teleDebidasMinRed = Math.round(tele.debidasMin);
+  const teleTrabajadasMinRed = Math.round(tele.trabajadasMin);
+
   return {
-    debidasMin: debidasMin, trabajadasMin: trabajadasMin,
-    debidasTexto: minutosATexto_(debidasMin), trabajadasTexto: minutosATexto_(trabajadasMin),
-    diasConFaltaNoJustificada: diasConFaltaNoJustificada
+    presencial: aplicaPresencial ? {
+      debidasMin: pres.debidasMin, trabajadasMin: pres.trabajadasMin,
+      debidasTexto: minutosATexto_(pres.debidasMin), trabajadasTexto: minutosATexto_(pres.trabajadasMin),
+      diasConFaltaNoJustificada: pres.diasConFaltaNoJustificada
+    } : null,
+    teletrabajo: aplicaTeletrabajo ? {
+      horasSemanales: horasSemanalesTeletrabajo,
+      debidasMin: teleDebidasMinRed, trabajadasMin: teleTrabajadasMinRed,
+      debidasTexto: minutosATexto_(teleDebidasMinRed), trabajadasTexto: minutosATexto_(teleTrabajadasMinRed),
+      diasConFaltaNoJustificada: tele.diasConFaltaNoJustificada
+    } : null
   };
 }
 

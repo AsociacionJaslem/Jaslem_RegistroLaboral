@@ -205,31 +205,40 @@ function generarPdf(logoBase64, trabajador, periodo, datos, certificacion, resum
   pdf.text('DNI/NIE: ' + trabajador.dni + (trabajador.categoria ? '   ·   Categoría profesional: ' + trabajador.categoria : ''), 40, 134);
   if (trabajador.nss) pdf.text('Nº Seguridad Social: ' + trabajador.nss, 40, 148);
 
-  // "Horas debidas" (lo que tocaba trabajar según su horario, sin contar
-  // festivos) y "Horas trabajadas" (lo realmente fichado, más los permisos
-  // retribuidos que cuentan como trabajados — ver calcularHorasDebidasYTrabajadas).
-  // En el histórico completo no se calculan horas debidas (puede abarcar
-  // años con horarios distintos), así que ahí solo se muestra lo fichado.
+  // "Horas debidas" (lo que tocaba trabajar) y "Horas trabajadas" (lo
+  // realmente fichado, más los permisos retribuidos que cuentan como
+  // trabajados), en dos bloques separados: jornada presencial y jornada de
+  // teletrabajo (ver calcularHorasDebidasYTrabajadas). En el histórico
+  // completo no se calculan horas debidas (puede abarcar años con horarios
+  // distintos), así que ahí solo se muestra lo fichado.
   let yHoras = 166;
   pdf.setFont('helvetica', 'bold'); pdf.setFontSize(10);
-  if (resumenHoras) {
-    pdf.text('Horas debidas en el periodo: ' + resumenHoras.debidasTexto, 40, yHoras);
+  function pintarBloqueHoras_(titulo, bloque) {
+    pdf.setFont('helvetica', 'bold'); pdf.setFontSize(10);
+    pdf.text(titulo, 40, yHoras);
     yHoras += 14;
-    pdf.text('Horas trabajadas en el periodo: ' + resumenHoras.trabajadasTexto, 40, yHoras);
-    if (resumenHoras.trabajadasMin < resumenHoras.debidasMin) {
+    pdf.setFont('helvetica', 'normal'); pdf.setFontSize(9.5);
+    pdf.text('Horas debidas: ' + bloque.debidasTexto + '    ·    Horas trabajadas: ' + bloque.trabajadasTexto, 40, yHoras);
+    if (bloque.trabajadasMin < bloque.debidasMin) {
       yHoras += 13;
-      pdf.setFont('helvetica', 'normal'); pdf.setFontSize(8.5);
+      pdf.setFontSize(8.5);
       pdf.setTextColor.apply(pdf, COLORES_ESTADO['Pendiente']);
-      const diasTexto = resumenHoras.diasConFaltaNoJustificada.length
-        ? ' (incluye falta de asistencia no justificada el ' + resumenHoras.diasConFaltaNoJustificada.join(', ') + ')'
+      const diasTexto = bloque.diasConFaltaNoJustificada.length
+        ? ' (incluye falta de asistencia no justificada el ' + bloque.diasConFaltaNoJustificada.join(', ') + ')'
         : '';
-      pdf.text('Diferencia: ' + minutosATexto(resumenHoras.debidasMin - resumenHoras.trabajadasMin) + diasTexto, 40, yHoras);
+      pdf.text('Diferencia: ' + minutosATexto(bloque.debidasMin - bloque.trabajadasMin) + diasTexto, 40, yHoras);
       pdf.setTextColor.apply(pdf, COLOR_TEXTO);
     }
+    yHoras += 16;
+  }
+  if (resumenHoras) {
+    if (resumenHoras.presencial) pintarBloqueHoras_('Jornada presencial', resumenHoras.presencial);
+    if (resumenHoras.teletrabajo) pintarBloqueHoras_('Jornada de teletrabajo', resumenHoras.teletrabajo);
   } else {
     pdf.text('Horas trabajadas en el periodo: ' + calcularHorasTrabajadas(datos.registros), 40, yHoras);
+    yHoras += 16;
   }
-  const startYTabla = yHoras + 22;
+  const startYTabla = yHoras + 6;
 
   // Cada fichaje en su fila normal; si tiene alguna corrección (la pidiera
   // el trabajador o la certificara el administrador, sea o no un motivo
@@ -378,15 +387,19 @@ function generarExcel(trabajador, periodo, datos, certificacion, resumenHoras) {
     [NOMBRE_ORGANIZACION + ' — Informe de ' + periodo.etiqueta],
     ['Trabajador: ' + trabajador.nombre + '   DNI/NIE: ' + trabajador.dni + (trabajador.categoria ? '   Categoría: ' + trabajador.categoria : '')]
   ];
-  if (resumenHoras) {
-    filas.push(['Horas debidas en el periodo: ' + resumenHoras.debidasTexto]);
-    filas.push(['Horas trabajadas en el periodo: ' + resumenHoras.trabajadasTexto]);
-    if (resumenHoras.trabajadasMin < resumenHoras.debidasMin) {
-      const diasTexto = resumenHoras.diasConFaltaNoJustificada.length
-        ? ' (incluye falta de asistencia no justificada el ' + resumenHoras.diasConFaltaNoJustificada.join(', ') + ')'
+  function filasBloqueHoras_(titulo, bloque) {
+    filas.push([titulo]);
+    filas.push(['Horas debidas: ' + bloque.debidasTexto + '    Horas trabajadas: ' + bloque.trabajadasTexto]);
+    if (bloque.trabajadasMin < bloque.debidasMin) {
+      const diasTexto = bloque.diasConFaltaNoJustificada.length
+        ? ' (incluye falta de asistencia no justificada el ' + bloque.diasConFaltaNoJustificada.join(', ') + ')'
         : '';
-      filas.push(['Diferencia: ' + minutosATexto(resumenHoras.debidasMin - resumenHoras.trabajadasMin) + diasTexto]);
+      filas.push(['Diferencia: ' + minutosATexto(bloque.debidasMin - bloque.trabajadasMin) + diasTexto]);
     }
+  }
+  if (resumenHoras) {
+    if (resumenHoras.presencial) filasBloqueHoras_('Jornada presencial', resumenHoras.presencial);
+    if (resumenHoras.teletrabajo) filasBloqueHoras_('Jornada de teletrabajo', resumenHoras.teletrabajo);
   } else {
     filas.push(['Horas trabajadas en el periodo: ' + calcularHorasTrabajadas(datos.registros)]);
   }
