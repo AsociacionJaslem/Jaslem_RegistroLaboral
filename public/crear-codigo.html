@@ -175,9 +175,19 @@
         window.history.replaceState(null, '', window.location.pathname);
         document.getElementById('vista-formulario').style.display = 'none';
         document.getElementById('vista-final').style.display = 'block';
-      }).catch(function () {
+        if (res.mensajeDiagnostico) {
+          const diag = document.createElement('div');
+          diag.style.cssText = 'margin-top:14px;font-size:11px;color:#888;word-break:break-all;';
+          diag.textContent = res.mensajeDiagnostico;
+          document.getElementById('vista-final').appendChild(diag);
+        }
+      }).catch(function (err) {
         boton.disabled = false;
-        mostrarMensaje('No se pudo guardar el código. Inténtalo de nuevo.', 'error');
+        // Se muestra el error real de Firebase (código técnico) para poder
+        // diagnosticar el problema si vuelve a fallar — no es bonito, pero
+        // es temporal mientras depuramos la recuperación de código.
+        const detalle = (err && (err.code || err.message)) ? ' (' + (err.code || err.message) + ')' : '';
+        mostrarMensaje('No se pudo guardar el código. Inténtalo de nuevo.' + detalle, 'error');
       });
     };
   </script>

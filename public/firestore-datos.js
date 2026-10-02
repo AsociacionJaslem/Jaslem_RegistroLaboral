@@ -418,7 +418,19 @@ async function sincronizarCuentaYCodigo(auth, db, dni, codigoNuevo, email) {
     }
   } catch (e) { /* si la búsqueda falla, el código nuevo ya funciona igualmente */ }
 
-  return { ok: true };
+  // DIAGNÓSTICO TEMPORAL: justo aquí, con el código recién guardado,
+  // probamos a iniciar sesión con ese mismo código (lo mismo que hace
+  // "Mis registros") para saber si el fallo ocurre en este mismo instante
+  // o solo más tarde, en otra página/sesión.
+  let diagnostico = '';
+  try {
+    await signInWithEmailAndPassword(auth, email, codigoNuevo);
+    diagnostico = ' [autocomprobación: inicio de sesión OK justo después de guardar, uid=' + uid + ']';
+  } catch (eDiag) {
+    diagnostico = ' [autocomprobación: FALLÓ justo después de guardar — ' + (eDiag.code || eDiag.message) + ', uid=' + uid + ', email usado=' + email + ']';
+  }
+
+  return { ok: true, mensaje: diagnostico };
 }
 
 // El enlace del correo (invitación o "he olvidado mi código") apunta a
@@ -478,7 +490,7 @@ export async function aceptarInvitacion(auth, db, email, dni, codigoNuevo) {
   const resultado = await sincronizarCuentaYCodigo(auth, db, dniDigits, codigoNuevo, email);
   if (!resultado.ok) { await signOut(auth); return resultado; }
   await signOut(auth); // el kiosk no debe quedarse con nadie con la sesión abierta
-  return { ok: true };
+  return { ok: true, mensajeDiagnostico: resultado.mensaje || '' };
 }
 
 // "He olvidado mi código" — lo pide el propio trabajador, sin que el
