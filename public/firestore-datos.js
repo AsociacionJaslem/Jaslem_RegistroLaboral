@@ -398,7 +398,16 @@ async function sincronizarCuentaYCodigo(auth, db, dni, codigoNuevo, email) {
   // (hace falta para calcular su huella), así que no es una exposición
   // nueva: es el mismo nivel de acceso que ya da conocer el código.
   const huellaNueva = await calcularHashCodigo(codigoNuevo);
-  await setDoc(doc(db, 'codigos_fichaje', huellaNueva), { dni: dni, email: email || null });
+  // Esta colección es "solo creación": si el trabajador elige el MISMO
+  // código que ya tenía (misma huella = mismo documento), intentar volver
+  // a guardarlo se interpreta como una modificación de un documento ya
+  // existente, y las reglas de seguridad lo rechazan (permission-denied).
+  // Por eso se comprueba antes si ya existe exactamente ese documento, y
+  // solo se crea si de verdad es nuevo.
+  const yaExistiaIgual = (await getDoc(doc(db, 'codigos_fichaje', huellaNueva))).exists();
+  if (!yaExistiaIgual) {
+    await setDoc(doc(db, 'codigos_fichaje', huellaNueva), { dni: dni, email: email || null });
+  }
   try { await updateDoc(doc(db, 'trabajadores_privado', dni), { hashCodigoActual: huellaNueva }); } catch (e) { /* no crítico: solo es un apunte informativo */ }
 
   // Solo ahora, con el código nuevo ya funcionando, se buscan y se borran
