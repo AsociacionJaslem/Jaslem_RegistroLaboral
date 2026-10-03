@@ -40,9 +40,10 @@ export function formatearCodigoVerificacion(huellaHex) {
   return String(huellaHex || '').toUpperCase().match(/.{1,4}/g).join('-');
 }
 
-// Lista cerrada de motivos (orden alfabético). Debe coincidir EXACTAMENTE
-// con MOTIVOS_CORRECCION en el resto del código (hay una copia idéntica,
-// codificada a mano, en index.html).
+// Lista cerrada de motivos (orden alfabético), para uso del ADMINISTRADOR
+// (ve y puede usar todos). Debe coincidir EXACTAMENTE con MOTIVOS_CORRECCION
+// en el resto del código (hay una copia idéntica, codificada a mano, en
+// index.html).
 //
 // Política de la organización: TODOS los motivos de esta lista se
 // consideran justificados y cuentan como tiempo trabajado (no generan
@@ -54,15 +55,34 @@ export const MOTIVOS_CORRECCION = [
   'Asistencia a consulta médica',
   'Baja médica',
   'Citaciones judiciales o renovación DNI',
-  'Exámenes prenatales',
   'Fallecimiento de familiar, accidente o enfermedad grave',
   'Falta de asistencia no justificada',
   'Gestión Externa (labores realizadas fuera del centro de trabajo)',
   'Lactancia',
   'Maternidad',
   'Matrimonio o registro de pareja de hecho',
-  'Mudanza o traslado de municipio',
+  'Olvidó fichar en su franja horaria',
+  'Otros motivos solicitados',
   'Paternidad'
+];
+
+// Subconjunto que puede ver y elegir el propio TRABAJADOR (al fichar fuera
+// de horario o al solicitar la corrección de uno de sus registros). Orden
+// fijo, no alfabético (decidido así a propósito, no cambiar el orden sin
+// que lo pidan): "Olvidó fichar en su franja horaria" el primero (el motivo
+// más habitual), luego el resto de motivos frecuentes, "Otros motivos
+// solicitados" como comodín para cualquier caso no listado, y "Falta de
+// asistencia no justificada" siempre al final, como opción honesta para
+// que el propio trabajador pueda reconocer una ausencia no justificada.
+export const MOTIVOS_CORRECCION_TRABAJADOR = [
+  'Olvidó fichar en su franja horaria',
+  'Asistencia a consulta médica',
+  'Citaciones judiciales o renovación DNI',
+  'Fallecimiento de familiar, accidente o enfermedad grave',
+  'Gestión Externa (labores realizadas fuera del centro de trabajo)',
+  'Lactancia',
+  'Otros motivos solicitados',
+  'Falta de asistencia no justificada'
 ];
 
 export const MOTIVO_NO_JUSTIFICADO = 'Falta de asistencia no justificada';

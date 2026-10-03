@@ -3,6 +3,9 @@
 <head>
   <base target="_top">
   <meta charset="UTF-8">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Lexend:wght@600;700;800&display=swap" rel="stylesheet">
   <style>
     :root {
       --verde-oscuro: #298578;
@@ -17,15 +20,40 @@
       --btn-entrada: #1F6F63;
       --btn-salida: #C1592F;
       --sombra: 0 4px 18px rgba(41, 133, 120, 0.18);
+
+      /* ---- Sistema ampliado para el panel de administración: una paleta
+         neutra de "pizarra" (gris-azulada) para estructura y texto
+         secundario, más semántica clara (info/éxito/aviso/error), pensada
+         para que el administrador lea rápido el estado de cada cosa. ---- */
+      --pizarra-900: #16232A;
+      --pizarra-700: #334B52;
+      --pizarra-500: #5B7570;
+      --pizarra-300: #9BB3AE;
+      --pizarra-200: #D7E6E2;
+      --pizarra-100: #EEF5F3;
+      --pizarra-50:  #F7FAF9;
+      --azul-info: #2C5F8A;
+      --azul-info-fondo: #EAF2FB;
+      --exito: #1F6F63;
+      --exito-fondo: #E3F3EF;
+      --radio-sm: 8px;
+      --radio-md: 12px;
+      --radio-lg: 16px;
+      --sombra-sutil: 0 1px 2px rgba(22, 35, 42, 0.06), 0 1px 0 rgba(22, 35, 42, 0.04);
+      --sombra-tarjeta: 0 2px 10px rgba(22, 35, 42, 0.07);
+      --anillo-foco: 0 0 0 3px rgba(41, 133, 120, 0.18);
+      --fuente-ui: 'Inter', 'Segoe UI', Roboto, -apple-system, sans-serif;
+      --fuente-titulos: 'Lexend', 'Inter', 'Segoe UI', sans-serif;
     }
 
     * { box-sizing: border-box; }
     html, body { height: 100%; margin: 0; overscroll-behavior: none; }
 
     body {
-      font-family: 'Segoe UI', Roboto, -apple-system, sans-serif;
+      font-family: var(--fuente-ui);
       background: linear-gradient(160deg, var(--fondo) 0%, #E4EFED 100%);
       color: var(--texto);
+      -webkit-font-smoothing: antialiased;
     }
 
     .app-shell { min-height: 100vh; display: flex; flex-direction: column; }
@@ -65,19 +93,46 @@
 
     .campo-pin {
       width: 100%; padding: clamp(15px, 2.4vw, 20px); font-size: clamp(22px, 3.6vw, 28px); text-align: center;
-      letter-spacing: 5px; border: 2px solid #DCEAE7; border-radius: 14px; margin-bottom: 8px; color: var(--texto); background: var(--fondo);
+      letter-spacing: 5px; border: 1.5px solid var(--pizarra-200); border-radius: var(--radio-md); margin-bottom: 8px;
+      color: var(--pizarra-900); background: var(--blanco); font-family: var(--fuente-titulos); font-weight: 600;
+      box-shadow: var(--sombra-sutil); transition: border-color 0.15s, box-shadow 0.15s;
     }
-    .campo-pin:focus { outline: none; border-color: var(--verde-claro); }
+    .campo-pin:focus { outline: none; border-color: var(--verde-oscuro); box-shadow: var(--anillo-foco); }
 
     .campo-texto {
-      width: 100%; padding: 12px 14px; font-size: 14px; border: 2px solid #DCEAE7; border-radius: 10px;
-      margin-bottom: 10px; color: var(--texto); background: var(--fondo); font-family: inherit;
+      width: 100%; padding: 12px 14px; font-size: 14px; border: 1.5px solid var(--pizarra-200); border-radius: var(--radio-sm);
+      margin-bottom: 10px; color: var(--texto); background: var(--blanco); font-family: inherit;
+      transition: border-color 0.15s, box-shadow 0.15s; box-shadow: var(--sombra-sutil);
     }
-    .campo-texto:focus { outline: none; border-color: var(--verde-claro); }
+    .campo-texto:hover { border-color: var(--verde-claro); }
+    .campo-texto:focus { outline: none; border-color: var(--verde-oscuro); box-shadow: var(--anillo-foco); }
     textarea.campo-texto { resize: vertical; min-height: 60px; }
 
-    .ayuda-pin { font-size: clamp(11px, 1.4vw, 13px); color: #8AA9A4; text-align: center; margin-bottom: 22px; }
-    .etiqueta-campo { display: block; text-align: left; font-size: 12px; font-weight: 700; color: var(--verde-medio); margin: 10px 0 4px; }
+    /* Selectores nativos: se homogeneiza su aspecto entre navegadores y se
+       añade una flecha propia (en vez del triángulo del sistema), para que
+       encajen visualmente con el resto de campos. */
+    select.campo-texto {
+      -webkit-appearance: none; -moz-appearance: none; appearance: none;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none'%3E%3Cpath d='M5.5 7.5L10 12l4.5-4.5' stroke='%23489791' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+      background-repeat: no-repeat; background-position: right 12px center; background-size: 16px;
+      padding-right: 36px; cursor: pointer;
+    }
+    /* Selectores de fecha/hora nativos: mismo marco que el resto de campos,
+       con el icono de calendario/reloj del sistema recolocado y teñido en
+       verde corporativo para que no desentone. */
+    input[type="date"].campo-texto, input[type="time"].campo-texto, .horario-dia-fila input[type="time"], .horario-tramo-fila input[type="time"] {
+      cursor: pointer;
+    }
+    input[type="date"]::-webkit-calendar-picker-indicator, input[type="time"]::-webkit-calendar-picker-indicator {
+      filter: invert(36%) sepia(22%) saturate(1206%) hue-rotate(130deg) brightness(93%) contrast(89%);
+      cursor: pointer; padding: 3px; border-radius: 6px; transition: background 0.15s;
+    }
+    input[type="date"]::-webkit-calendar-picker-indicator:hover, input[type="time"]::-webkit-calendar-picker-indicator:hover {
+      background: var(--pizarra-100);
+    }
+
+    .ayuda-pin { font-size: clamp(11px, 1.4vw, 13px); color: var(--pizarra-500); text-align: center; margin-bottom: 22px; }
+    .etiqueta-campo { display: block; text-align: left; font-size: 12px; font-weight: 700; color: var(--pizarra-700); margin: 10px 0 4px; letter-spacing: 0.1px; }
 
     .fila-botones { display: flex; gap: 14px; margin-bottom: 8px; }
     .btn {
@@ -96,17 +151,27 @@
       width: 100%; padding: 10px; border-radius: 10px; font-size: 13px; font-weight: 700; cursor: pointer; margin-top: 6px;
     }
 
-    .mensaje { margin-top: 16px; padding: 12px 14px; border-radius: 12px; font-size: clamp(13px, 1.7vw, 15px); font-weight: 600; display: none; text-align: center; }
-    .mensaje.ok { display: block; background: #E3F3F0; color: var(--verde-oscuro); }
+    .mensaje {
+      margin-top: 16px; padding: 12px 14px 12px 40px; border-radius: var(--radio-md); font-size: clamp(13px, 1.7vw, 15px);
+      font-weight: 600; display: none; text-align: left; position: relative; line-height: 1.4; box-shadow: var(--sombra-sutil);
+    }
+    .mensaje::before {
+      position: absolute; left: 14px; top: 50%; transform: translateY(-50%); font-size: 15px; font-weight: 800;
+      width: 18px; height: 18px; border-radius: 50%; display: flex; align-items: center; justify-content: center; color: #fff;
+    }
+    .mensaje.ok { display: block; background: var(--exito-fondo); color: var(--verde-oscuro); }
+    .mensaje.ok::before { content: '✓'; background: var(--btn-entrada); font-size: 11px; }
     .mensaje.error { display: block; background: #FBEAE8; color: var(--rojo-error); }
+    .mensaje.error::before { content: '✕'; background: var(--rojo-error); font-size: 10px; }
     .mensaje.aviso { display: block; background: var(--naranja-fondo); color: var(--naranja-aviso); margin-top: 10px; }
+    .mensaje.aviso::before { content: '!'; background: var(--naranja-aviso); }
 
     .justificacion { display: none; margin-top: 14px; padding: 16px; background: var(--naranja-fondo); border-radius: 12px; text-align: center; }
     .justificacion.activa { display: block; }
     .justificacion .pregunta { font-size: clamp(13px, 1.7vw, 15px); font-weight: 700; color: var(--naranja-aviso); margin-bottom: 12px; }
     .selector-motivo { text-align: left; margin-top: 6px; }
     .selector-motivo select.campo-texto { margin-bottom: 4px; }
-    .selector-trabajadores-calendario { border: 1px solid #DCEAE7; border-radius: 12px; padding: 8px 10px; margin-bottom: 4px; }
+    .selector-trabajadores-calendario { border: 1px solid var(--pizarra-200); border-radius: 12px; padding: 8px 10px; margin-bottom: 4px; }
     .fila-checkbox-trabajador { display: flex; align-items: center; gap: 8px; padding: 5px 2px; font-size: 12.5px; color: var(--texto); cursor: pointer; }
     .fila-checkbox-trabajador input[type="checkbox"] { width: 16px; height: 16px; flex-shrink: 0; }
     .fila-checkbox-trabajador.todos { font-weight: 700; border-bottom: 1px solid #EDF3F2; margin-bottom: 4px; padding-bottom: 8px; }
@@ -118,7 +183,14 @@
     .btn-justificar:disabled { opacity: 0.6; cursor: not-allowed; }
 
     .selector-mes { display: flex; gap: 8px; margin-bottom: 16px; }
-    .selector-mes select { flex: 1; padding: 12px; border-radius: 10px; border: 2px solid #DCEAE7; background: var(--fondo); font-size: clamp(13px, 1.6vw, 15px); }
+    .selector-mes select {
+      flex: 1; padding: 12px; padding-right: 34px; border-radius: var(--radio-sm); border: 1.5px solid var(--pizarra-200);
+      background: var(--blanco); font-size: clamp(13px, 1.6vw, 15px); color: var(--texto); font-family: inherit; cursor: pointer;
+      -webkit-appearance: none; -moz-appearance: none; appearance: none; box-shadow: var(--sombra-sutil); transition: border-color 0.15s, box-shadow 0.15s;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none'%3E%3Cpath d='M5.5 7.5L10 12l4.5-4.5' stroke='%23489791' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+      background-repeat: no-repeat; background-position: right 10px center; background-size: 16px;
+    }
+    .selector-mes select:focus { outline: none; border-color: var(--verde-oscuro); box-shadow: var(--anillo-foco); }
 
     .lista-registros { text-align: left; max-height: 320px; overflow-y: auto; margin-top: 12px; }
     .fila-registro { padding: 10px 8px; border-bottom: 1px solid #EFF5F4; font-size: clamp(13px, 1.6vw, 15px); }
@@ -154,7 +226,7 @@
     .tabla-mis-registros tbody tr.naranja td { color: #B9770E; font-weight: 700; background: #FBF1E3; }
     .tabla-mis-registros tbody tr.naranja { box-shadow: inset 4px 0 0 #B9770E; }
     .etiqueta-ya-solicitada { font-size: 10px; font-weight: 800; text-transform: uppercase; color: #6B3FA0; }
-    .leyenda-colores { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 14px; font-size: 11px; color: #6C8B86; }
+    .leyenda-colores { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 14px; font-size: 11px; color: var(--pizarra-500); }
     .leyenda-colores .punto { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 4px; vertical-align: middle; }
     .leyenda-colores .punto.verde { background: var(--btn-entrada); }
     .leyenda-colores .punto.roja { background: var(--rojo-error); }
@@ -177,12 +249,18 @@
     .fila-registro .advertencia-linea { color: var(--naranja-aviso); font-size: 0.85em; margin-top: 3px; }
     .link-corregir { background: none; border: none; color: var(--verde-medio); font-size: 11px; font-weight: 700; text-decoration: underline; cursor: pointer; padding: 4px 0; }
 
-    .fila-incidencia { padding: 10px 10px; border-radius: 10px; background: var(--naranja-fondo); color: var(--naranja-aviso); font-size: clamp(12px, 1.5vw, 14px); margin-bottom: 6px; text-align: left; }
+    .fila-incidencia {
+      padding: 10px 10px 10px 14px; border-radius: var(--radio-sm); background: var(--naranja-fondo); color: var(--naranja-aviso);
+      font-size: clamp(12px, 1.5vw, 14px); margin-bottom: 6px; text-align: left; box-shadow: inset 3px 0 0 var(--naranja-aviso);
+    }
     .fila-incidencia .justif { font-weight: 700; }
     .fila-incidencia .justif.si { color: var(--btn-entrada); }
     .fila-incidencia .justif.no { color: var(--rojo-error); }
-    .fila-correccion { padding: 10px 10px; border-radius: 10px; background: #EAF2FB; color: #2E5C8A; font-size: clamp(11px, 1.4vw, 13px); margin-bottom: 6px; text-align: left; }
-    .vacio { color: #8AA9A4; font-size: 13px; padding: 20px 0; text-align: center; }
+    .fila-correccion {
+      padding: 10px 10px 10px 14px; border-radius: var(--radio-sm); background: var(--azul-info-fondo); color: var(--azul-info);
+      font-size: clamp(11px, 1.4vw, 13px); margin-bottom: 6px; text-align: left; box-shadow: inset 3px 0 0 var(--azul-info);
+    }
+    .vacio { color: var(--pizarra-500); font-size: 13px; padding: 20px 0; text-align: center; }
 
     .form-correccion { display: none; text-align: left; background: var(--fondo); border-radius: 12px; padding: 16px; margin-top: 10px; border: 2px solid var(--verde-claro); }
     .form-correccion.activo { display: block; }
@@ -191,6 +269,24 @@
     .btn-enviar-correccion { background: var(--verde-oscuro); color: #fff; }
     .btn-cancelar-correccion { background: #E4EFED; color: var(--texto); }
     .fila-form-botones button { flex: 1; padding: 10px; border: none; border-radius: 10px; font-weight: 700; font-size: 13px; cursor: pointer; }
+
+    /* Comparación visual, de un vistazo, entre lo que tenía ASIGNADO ese día
+       y lo que realmente FICHÓ — para que el administrador decida con
+       conocimiento antes de confirmar una hora o asignar otra distinta. */
+    .comparacion-horario { display: flex; gap: 10px; margin-bottom: 10px; flex-wrap: wrap; }
+    .caja-horario { flex: 1; min-width: 140px; border-radius: 10px; padding: 10px 12px; }
+    .caja-horario .etiqueta-caja { font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .3px; opacity: .8; margin-bottom: 3px; }
+    .caja-horario .valor-caja { font-size: 14px; font-weight: 700; }
+    .caja-horario.asignado { background: var(--azul-info-fondo); color: var(--azul-info); box-shadow: inset 3px 0 0 var(--azul-info); }
+    .caja-horario.fichado { background: #FBEAE8; color: var(--rojo-error); box-shadow: inset 3px 0 0 var(--rojo-error); }
+    .caja-horario.fichado.sin-aviso { background: #EAF6EF; color: var(--btn-entrada); box-shadow: inset 3px 0 0 var(--btn-entrada); }
+    .eleccion-hora { display: flex; gap: 8px; margin: 2px 0 10px; flex-wrap: wrap; }
+    .btn-eleccion-hora {
+      flex: 1; min-width: 150px; border: 1.5px solid var(--verde-claro); background: var(--blanco); border-radius: 9px;
+      padding: 9px 10px; font-size: 12.5px; font-weight: 700; color: var(--texto); cursor: pointer; text-align: center;
+    }
+    .btn-eleccion-hora:hover { border-color: var(--verde-oscuro); }
+    .btn-eleccion-hora.elegida { background: var(--verde-oscuro); border-color: var(--verde-oscuro); color: #fff; }
 
     /* ---------- POPUP CORPORATIVO ---------- */
     /* ---------- OVERLAY DE CARGA: bloquea toda la pantalla mientras se procesa una petición ---------- */
@@ -233,9 +329,10 @@
 
     /* ---------- TARJETAS DE REGISTROS PENDIENTES ---------- */
     .tarjeta-pendiente {
-      background: var(--fondo); border: 2px solid #E4EFED; border-radius: 14px; padding: 14px 16px;
-      margin-bottom: 10px; cursor: pointer; transition: border-color 0.15s, opacity 0.15s;
+      background: var(--blanco); border: 1.5px solid var(--pizarra-200); border-radius: var(--radio-md); padding: 14px 16px;
+      margin-bottom: 10px; cursor: pointer; transition: border-color 0.15s, opacity 0.15s, box-shadow 0.15s; box-shadow: var(--sombra-sutil);
     }
+    .tarjeta-pendiente:hover { box-shadow: var(--sombra-tarjeta); }
     .tarjeta-pendiente.seleccionada { border-color: var(--verde-oscuro); background: var(--blanco); cursor: default; }
     .tarjeta-pendiente.deshabilitada { opacity: 0.4; pointer-events: none; cursor: default; }
     .cabecera-pendiente { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 4px; }
@@ -246,8 +343,8 @@
     .estado-no { background: #FBEAE8; color: var(--rojo-error); }
     .estado-ausencia { background: #EAF2FB; color: #2E5C8A; }
     .estado-pendiente-color { background: var(--naranja-fondo); color: var(--naranja-aviso); }
-    .detalle-pendiente { font-size: 12px; color: #6C8B86; }
-    .cuerpo-expandido { margin-top: 12px; padding-top: 12px; border-top: 1px dashed #DCEAE7; cursor: default; }
+    .detalle-pendiente { font-size: 12px; color: var(--pizarra-500); }
+    .cuerpo-expandido { margin-top: 12px; padding-top: 12px; border-top: 1px dashed var(--pizarra-200); cursor: default; }
     .lista-dias-grupo { display: flex; flex-direction: column; gap: 8px; }
     .item-dia-pendiente {
       background: var(--fondo); border: 2px solid #E4EFED; border-radius: 10px; padding: 10px 12px;
@@ -266,28 +363,47 @@
     .tile-fecha.roja { border-color: var(--rojo-error); color: var(--rojo-error); background: #FDF3F2; }
     .tile-fecha.seleccionada { border-color: var(--verde-oscuro); background: var(--blanco); box-shadow: 0 0 0 2px var(--verde-oscuro); }
     .tile-fecha.deshabilitada { opacity: 0.35; pointer-events: none; }
-    .detalle-fecha-contenido { margin-top: 14px; padding-top: 14px; border-top: 1px dashed #DCEAE7; text-align: left; }
+    .detalle-fecha-contenido { margin-top: 14px; padding-top: 14px; border-top: 1px dashed var(--pizarra-200); text-align: left; }
 
     /* ---------- ADMINISTRACIÓN: identificación y secciones ---------- */
     .admin-identificado {
       display: flex; justify-content: space-between; align-items: center;
-      background: var(--fondo); padding: 10px 14px; border-radius: 10px; margin-bottom: 18px; font-size: 13px;
+      background: linear-gradient(135deg, var(--pizarra-900) 0%, #203840 100%);
+      padding: 12px 18px; border-radius: var(--radio-md); margin-bottom: 18px; font-size: 13px; color: #CFE4E0;
+      box-shadow: var(--sombra-tarjeta);
     }
-    .admin-identificado b { color: var(--verde-oscuro); }
-    .btn-logout-admin { background: none; border: none; color: var(--rojo-error); font-size: 12px; font-weight: 700; text-decoration: underline; cursor: pointer; }
+    .admin-identificado .admin-quien { display: flex; align-items: center; gap: 10px; }
+    .admin-avatar {
+      width: 30px; height: 30px; border-radius: 50%; background: var(--verde-claro); color: var(--pizarra-900);
+      display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 12.5px; flex-shrink: 0;
+    }
+    .admin-identificado b { color: #fff; font-weight: 700; }
+    .admin-rol-tag { font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.4px; color: var(--verde-claro); display: block; }
+    .btn-logout-admin {
+      background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.18); color: #fff; font-size: 12px; font-weight: 700;
+      padding: 7px 12px; border-radius: var(--radio-sm); cursor: pointer; transition: background 0.15s;
+    }
+    .btn-logout-admin:hover { background: rgba(255,255,255,0.16); }
 
-    .titulo-seccion { font-weight: 800; color: var(--verde-oscuro); font-size: 14px; margin-bottom: 10px; text-align: left; }
+    .titulo-seccion { font-family: var(--fuente-titulos); font-weight: 700; color: var(--pizarra-900); font-size: 15px; margin-bottom: 4px; text-align: left; letter-spacing: 0.1px; }
+    .subtitulo-seccion { font-size: 12.5px; color: var(--pizarra-500); margin: 0 0 16px; text-align: left; line-height: 1.5; }
 
     /* ---------- PESTAÑAS DE ADMINISTRACIÓN ---------- */
-    .tabs-admin { display: flex; gap: 6px; overflow-x: auto; margin-top: 18px; padding-bottom: 2px; -webkit-overflow-scrolling: touch; scrollbar-width: thin; }
-    .tab-admin-btn {
-      flex: 0 0 auto; display: flex; align-items: center; gap: 6px; border: none; border-radius: 10px 10px 0 0;
-      background: var(--fondo); color: var(--texto); opacity: 0.65; font-size: 12px; font-weight: 700;
-      padding: 9px 13px; cursor: pointer; white-space: nowrap; border-bottom: 3px solid transparent;
+    .tabs-admin {
+      display: flex; gap: 2px; overflow-x: auto; margin-top: 18px; padding: 4px; -webkit-overflow-scrolling: touch;
+      scrollbar-width: thin; background: var(--pizarra-100); border-radius: var(--radio-md);
     }
-    .tab-admin-btn.activo { opacity: 1; background: #EAF4F1; color: var(--verde-oscuro); border-bottom: 3px solid var(--verde-oscuro); }
+    .tab-admin-btn {
+      flex: 0 0 auto; display: flex; align-items: center; gap: 7px; border: none; border-radius: var(--radio-sm);
+      background: transparent; color: var(--pizarra-500); font-size: 12.5px; font-weight: 700;
+      padding: 10px 14px; cursor: pointer; white-space: nowrap; transition: background 0.15s, color 0.15s;
+    }
+    .tab-admin-btn:hover { color: var(--verde-oscuro); }
+    .tab-admin-btn svg { width: 15px; height: 15px; flex-shrink: 0; opacity: 0.85; }
+    .tab-admin-btn.activo { background: var(--blanco); color: var(--verde-oscuro); box-shadow: var(--sombra-sutil); }
+    .tab-admin-btn.activo svg { opacity: 1; }
     .tab-admin-btn .badge-tab { background: var(--rojo-error); color: var(--blanco); font-size: 10px; font-weight: 800; border-radius: 8px; padding: 1px 6px; min-width: 16px; text-align: center; }
-    .panel-admin-tab { display: none; padding-top: 16px; text-align: left; }
+    .panel-admin-tab { display: none; padding-top: 20px; text-align: left; }
     .panel-admin-tab.activo { display: block; }
 
     /* ---------- GESTIÓN DE TRABAJADORES ---------- */
@@ -295,12 +411,12 @@
        sobremesa (una tablet en vertical, por ejemplo), los 3-4 botones de
        cada fila se salgan por el lado — en vez de eso, pasan a una
        segunda línea debajo del nombre del trabajador. */
-    .tarjeta-trabajador { background: var(--fondo); border: 2px solid #E4EFED; border-radius: 12px; padding: 10px 14px; margin-bottom: 8px; display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 10px; }
+    .tarjeta-trabajador { background: var(--blanco); border: 1.5px solid var(--pizarra-200); border-radius: var(--radio-md); padding: 10px 14px; margin-bottom: 8px; display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 10px; box-shadow: var(--sombra-sutil); }
     .tarjeta-trabajador .datos-trabajador-lista { flex: 1 1 200px; min-width: 180px; }
     .tarjeta-trabajador.inactivo { opacity: 0.55; border-style: dashed; }
     .datos-trabajador-lista { font-size: 12px; }
     .datos-trabajador-lista .nombre-tl { font-weight: 800; color: var(--texto); display: block; }
-    .datos-trabajador-lista .detalle-tl { color: #6C8B86; }
+    .datos-trabajador-lista .detalle-tl { color: var(--pizarra-500); }
     .etiqueta-estado-trabajador { font-size: 10px; font-weight: 800; text-transform: uppercase; padding: 3px 8px; border-radius: 20px; white-space: nowrap; }
     .etiqueta-estado-trabajador.activo { background: #E3F3EF; color: var(--btn-entrada); }
     .etiqueta-estado-trabajador.baja { background: #FBEAE8; color: var(--rojo-error); }
@@ -311,15 +427,15 @@
     .horario-dia-fila.con-modalidad { grid-template-columns: 76px 1fr 1fr 118px; }
     .horario-dia-fila.horario-pausa-fila { margin-top: -2px; margin-bottom: 10px; opacity: 0.75; }
     .horario-dia-fila.horario-pausa-fila span { font-size: 10.5px; }
-    .horario-dia-fila input[type="time"] { padding: 6px; border-radius: 8px; border: 1px solid #DCEAE7; font-size: 12px; }
-    .horario-dia-fila select { padding: 6px; border-radius: 8px; border: 1px solid #DCEAE7; font-size: 11.5px; }
+    .horario-dia-fila input[type="time"] { padding: 6px; border-radius: 8px; border: 1px solid var(--pizarra-200); font-size: 12px; }
+    .horario-dia-fila select { padding: 6px; border-radius: 8px; border: 1px solid var(--pizarra-200); font-size: 11.5px; }
     .horario-dia-fila-cabecera { display: flex; align-items: center; gap: 8px; margin-top: 10px; margin-bottom: 4px; font-size: 12px; font-weight: 800; }
-    .horario-dia-fila-cabecera select { padding: 5px; border-radius: 8px; border: 1px solid #DCEAE7; font-size: 11px; }
+    .horario-dia-fila-cabecera select { padding: 5px; border-radius: 8px; border: 1px solid var(--pizarra-200); font-size: 11px; }
     .btn-anadir-tramo { margin-left: auto; border: none; border-radius: 8px; padding: 4px 9px; font-size: 10.5px; font-weight: 700; cursor: pointer; background: #E3F0FB; color: #2C5F8A; }
     .horario-tramos-contenedor { display: flex; flex-direction: column; gap: 4px; margin-bottom: 4px; }
     .horario-tramo-fila { display: grid; grid-template-columns: 1fr 14px 1fr 24px; gap: 6px; align-items: center; }
     .horario-tramo-fila span { text-align: center; font-size: 11px; opacity: 0.6; }
-    .horario-tramo-fila input[type="time"] { padding: 6px; border-radius: 8px; border: 1px solid #DCEAE7; font-size: 12px; }
+    .horario-tramo-fila input[type="time"] { padding: 6px; border-radius: 8px; border: 1px solid var(--pizarra-200); font-size: 12px; }
     .btn-quitar-tramo { border: none; border-radius: 8px; width: 24px; height: 24px; font-size: 11px; font-weight: 800; cursor: pointer; background: #FBEAE8; color: var(--rojo-error); }
     .horario-teletrabajo-horas { margin-bottom: 8px; padding: 8px; border-radius: 10px; background: #F4F9F7; }
     .horario-teletrabajo-horas input[type="number"] { max-width: 100px; }
@@ -330,7 +446,18 @@
     .fila-checkbox-cifrar { margin: 10px 0; font-size: 12px; }
     .fila-checkbox-cifrar label { display: flex; align-items: center; gap: 6px; }
 
-    select.campo-texto { background: var(--fondo); cursor: pointer; }
+    /* (el fondo/flecha de los selectores ya se fija arriba, junto a .campo-texto) */
+
+    /* ---------- BADGE "Retribuido / No retribuido" junto al motivo ---------- */
+    .badge-motivo {
+      display: inline-flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 800;
+      padding: 3px 9px 3px 7px; border-radius: 20px; margin: -4px 0 10px; text-transform: uppercase; letter-spacing: 0.3px;
+    }
+    .badge-motivo::before { content: ''; width: 6px; height: 6px; border-radius: 50%; }
+    .badge-motivo.retribuido { background: var(--exito-fondo); color: var(--verde-oscuro); }
+    .badge-motivo.retribuido::before { background: var(--btn-entrada); }
+    .badge-motivo.no-retribuido { background: #FBEAE8; color: var(--rojo-error); }
+    .badge-motivo.no-retribuido::before { background: var(--rojo-error); }
 
     .fila-atajos-calendario { display: flex; gap: 8px; margin-bottom: 6px; }
     .btn-atajo-calendario {
@@ -523,7 +650,7 @@
             <a href="#" id="enlace-olvido-codigo" onclick="event.preventDefault(); solicitarRecuperacionCodigo();" style="font-size:13px;color:var(--verde-oscuro);">¿Has olvidado tu código?</a>
           </div>
           <div id="recuperacion-email-campos" style="display:none;margin-top:8px;">
-            <div style="font-size:12.5px;color:#52606d;margin-bottom:6px;">Escribe el email con el que recibiste la invitación — te mandaremos un enlace para elegir un código nuevo.</div>
+            <div style="font-size:12.5px;color:var(--pizarra-500);margin-bottom:6px;">Escribe el email con el que recibiste la invitación — te mandaremos un enlace para elegir un código nuevo.</div>
             <input type="email" class="campo-texto" id="recuperacion-email" placeholder="Tu email" autocomplete="username" style="margin-bottom:8px;">
             <button class="btn btn-consultar" onclick="enviarRecuperacionCodigo()">Enviar enlace de recuperación</button>
           </div>
@@ -544,18 +671,42 @@
           <!-- Paso 2: contenido de administración, oculto hasta identificarse -->
           <div id="admin-contenido" style="display:none;">
             <div class="admin-identificado">
-              <span>Identificado como <b id="admin-nombre-actual"></b></span>
+              <div class="admin-quien">
+                <div class="admin-avatar" id="admin-avatar-iniciales">A</div>
+                <span><span class="admin-rol-tag">Administrador</span><b id="admin-nombre-actual"></b></span>
+              </div>
               <button class="btn-logout-admin" onclick="cerrarSesionAdmin()">Cerrar sesión</button>
             </div>
 
             <div class="tabs-admin">
-              <button class="tab-admin-btn activo" id="admin-tabbtn-pendientes" onclick="cambiarTabAdmin('pendientes')">🔔 Pendientes <span class="badge-tab" id="badge-pendientes" style="display:none;"></span></button>
-              <button class="tab-admin-btn" id="admin-tabbtn-horarios" onclick="cambiarTabAdmin('horarios')">🕐 Horarios</button>
-              <button class="tab-admin-btn" id="admin-tabbtn-festivos" onclick="cambiarTabAdmin('festivos')">📅 Festivos y cierres</button>
-              <button class="tab-admin-btn" id="admin-tabbtn-bajas" onclick="cambiarTabAdmin('bajas')">🏖️ Vacaciones y bajas</button>
-              <button class="tab-admin-btn" id="admin-tabbtn-trabajadores" onclick="cambiarTabAdmin('trabajadores')">👥 Trabajadores</button>
-              <button class="tab-admin-btn" id="admin-tabbtn-alta" onclick="cambiarTabAdmin('alta')">➕ Alta nueva</button>
-              <button class="tab-admin-btn" id="admin-tabbtn-informes" onclick="cambiarTabAdmin('informes')">📄 Informes</button>
+              <button class="tab-admin-btn activo" id="admin-tabbtn-pendientes" onclick="cambiarTabAdmin('pendientes')">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+                Pendientes <span class="badge-tab" id="badge-pendientes" style="display:none;"></span>
+              </button>
+              <button class="tab-admin-btn" id="admin-tabbtn-horarios" onclick="cambiarTabAdmin('horarios')">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg>
+                Horarios
+              </button>
+              <button class="tab-admin-btn" id="admin-tabbtn-festivos" onclick="cambiarTabAdmin('festivos')">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4.5" width="18" height="16" rx="2"/><path d="M3 9.5h18M8 2.5v4M16 2.5v4"/></svg>
+                Festivos y cierres
+              </button>
+              <button class="tab-admin-btn" id="admin-tabbtn-bajas" onclick="cambiarTabAdmin('bajas')">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12.5a8 8 0 0 1 16 0"/><path d="M3 20h18M7 20v-4a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v4"/></svg>
+                Vacaciones y bajas
+              </button>
+              <button class="tab-admin-btn" id="admin-tabbtn-trabajadores" onclick="cambiarTabAdmin('trabajadores')">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3.2"/><path d="M2.5 20c0-3.3 2.9-6 6.5-6s6.5 2.7 6.5 6"/><path d="M16 5.2c1.5.4 2.6 1.8 2.6 3.3 0 1.6-1.1 2.9-2.6 3.3M18.5 14.3c2 .5 3.5 2.2 3.5 4.2"/></svg>
+                Trabajadores
+              </button>
+              <button class="tab-admin-btn" id="admin-tabbtn-alta" onclick="cambiarTabAdmin('alta')">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3.2"/><path d="M2.5 20c0-3.3 2.9-6 6.5-6s6.5 2.7 6.5 6"/><path d="M18 9v6M15 12h6"/></svg>
+                Alta nueva
+              </button>
+              <button class="tab-admin-btn" id="admin-tabbtn-informes" onclick="cambiarTabAdmin('informes')">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2.8V7a2 2 0 0 0 2 2h4.2"/><path d="M18 21H6a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h8l6 6v10a2 2 0 0 1-2 2Z"/><path d="M8 13h8M8 17h8M8 9h2"/></svg>
+                Informes
+              </button>
             </div>
 
             <!-- PESTAÑA: Pendientes de corrección + búsqueda individual -->
@@ -564,19 +715,21 @@
               <div id="lista-pendientes"><div class="vacio">Cargando…</div></div>
 
               <div class="titulo-seccion" style="margin-top:24px;padding-top:18px;border-top:2px dashed #E4EFED;">Buscar registros de un trabajador concreto</div>
-              <div class="ayuda-pin" style="margin-top:0;margin-bottom:10px;">Solo hace falta si quieres corregir algo que no aparece arriba, en la lista de pendientes.</div>
+              <div class="subtitulo-seccion">Solo hace falta si quieres corregir algo que no aparece arriba, en la lista de pendientes.</div>
               <input type="text" inputmode="numeric" pattern="[0-9]*" maxlength="9" class="campo-texto" id="dni-objetivo-admin" placeholder="DNI/NIE del trabajador">
               <div class="selector-mes"><select id="select-mes-admin"></select><select id="select-anio-admin"></select></div>
               <button class="btn btn-consultar" onclick="consultarAdmin()">Buscar registros</button>
               <div id="resultado-admin"></div>
               <div class="form-correccion" id="form-correccion-admin">
                 <div class="titulo-form">Corregir este registro (se añade como línea nueva a la cadena, nunca se sobrescribe ni se borra el original)</div>
+                <div id="correccion-admin-info"></div>
                 <label class="etiqueta-campo">Motivo</label>
                 <select class="campo-texto" id="correccion-admin-motivo"></select>
                 <label class="etiqueta-campo">Fecha correcta</label>
                 <input type="date" class="campo-texto" id="correccion-admin-fecha">
                 <label class="etiqueta-campo">Hora correcta</label>
                 <input type="time" class="campo-texto" id="correccion-admin-hora">
+                <div id="correccion-admin-botones-hora" style="margin:6px 0 2px;"></div>
                 <div class="fila-form-botones">
                   <button class="btn-enviar-correccion" onclick="enviarCorreccionAdmin()">Guardar corrección</button>
                   <button class="btn-cancelar-correccion" onclick="cancelarCorreccionAdmin()">Cancelar</button>
@@ -587,14 +740,14 @@
             <!-- PESTAÑA: Horarios (modalidad + horario de cada trabajador) -->
             <div class="panel-admin-tab" id="admin-tab-horarios">
               <div class="titulo-seccion">Horarios y modalidad de trabajo</div>
-              <div class="ayuda-pin" style="margin-top:0;margin-bottom:10px;">Elige un trabajador para cambiar su modalidad (presencial / teletrabajo / mixta), sus franjas horarias o su objetivo de horas semanales de teletrabajo.</div>
+              <div class="subtitulo-seccion">Elige un trabajador para cambiar su modalidad (presencial / teletrabajo / mixta), sus franjas horarias o su objetivo de horas semanales de teletrabajo.</div>
               <div id="lista-horarios-trabajadores"><div class="vacio">Cargando…</div></div>
             </div>
 
             <!-- PESTAÑA: Festivos y cierres (afecta siempre a todo el equipo) -->
             <div class="panel-admin-tab" id="admin-tab-festivos">
               <div class="titulo-seccion">Festivos y cierres (todo el equipo)</div>
-              <div class="ayuda-pin" style="margin-top:0;margin-bottom:10px;">Para un festivo oficial o un cierre por puente — se aplica siempre a todos los trabajadores a la vez, para el rango de fechas que elijas.</div>
+              <div class="subtitulo-seccion">Para un festivo oficial o un cierre por puente — se aplica siempre a todos los trabajadores a la vez, para el rango de fechas que elijas.</div>
 
               <label class="etiqueta-campo">Desde</label>
               <input type="date" class="campo-texto" id="calf-fecha-inicio">
@@ -617,7 +770,7 @@
             <!-- PESTAÑA: Vacaciones, bajas y otros permisos (individual, uno/varios/todos) -->
             <div class="panel-admin-tab" id="admin-tab-bajas">
               <div class="titulo-seccion">Vacaciones, bajas y otros permisos</div>
-              <div class="ayuda-pin" style="margin-top:0;margin-bottom:10px;">Para cualquier periodo de uno o varios días completos en los que un trabajador (o varios, si coinciden) no tiene que fichar: vacaciones, baja médica, paternidad/maternidad, y el resto de motivos justificados. Todos estos días cuentan como trabajados, sin descontar del cómputo del mes — no hace falta fichar nada esos días.</div>
+              <div class="subtitulo-seccion">Para cualquier periodo de uno o varios días completos en los que un trabajador (o varios, si coinciden) no tiene que fichar: vacaciones, baja médica, paternidad/maternidad, y el resto de motivos justificados. Todos estos días cuentan como trabajados, sin descontar del cómputo del mes — no hace falta fichar nada esos días.</div>
 
               <label class="etiqueta-campo">Desde</label>
               <input type="date" class="campo-texto" id="calb-fecha-inicio">
@@ -772,9 +925,8 @@
     // quede bloqueado de forma indefinida en una pantalla compartida.
     const SEGUNDOS_LIMITE_JUSTIFICACION = 120;
 
-    // Lista cerrada de motivos: la usa tanto el trabajador cuando indica que
-    // un fichaje NO está justificado como el administrador cuando corrige un
-    // registro. Mantener EXACTAMENTE igual que MOTIVOS_CORRECCION en
+    // Lista cerrada de motivos para el ADMINISTRADOR (los ve y puede usar
+    // todos). Mantener EXACTAMENTE igual que MOTIVOS_CORRECCION en
     // logica-comun.js. Política: todos estos motivos cuentan como
     // justificados y trabajados (no descuentan), EXCEPTO
     // "Falta de asistencia no justificada" (ver MOTIVO_NO_JUSTIFICADO_TEXTO).
@@ -782,15 +934,33 @@
       'Asistencia a consulta médica',
       'Baja médica',
       'Citaciones judiciales o renovación DNI',
-      'Exámenes prenatales',
       'Fallecimiento de familiar, accidente o enfermedad grave',
       'Falta de asistencia no justificada',
       'Gestión Externa (labores realizadas fuera del centro de trabajo)',
       'Lactancia',
       'Maternidad',
       'Matrimonio o registro de pareja de hecho',
-      'Mudanza o traslado de municipio',
+      'Olvidó fichar en su franja horaria',
+      'Otros motivos solicitados',
       'Paternidad'
+    ];
+
+    // Subconjunto visible y seleccionable por el propio TRABAJADOR (al
+    // fichar fuera de horario o al solicitar la corrección de un registro
+    // suyo). Orden fijo (no alfabético, decidido así a propósito): "Olvidó
+    // fichar en su franja horaria" el primero, luego el resto de motivos
+    // frecuentes, "Otros motivos solicitados" como comodín, y "Falta de
+    // asistencia no justificada" siempre al final. Mantener EXACTAMENTE
+    // igual que MOTIVOS_CORRECCION_TRABAJADOR en logica-comun.js.
+    const MOTIVOS_CORRECCION_TRABAJADOR = [
+      'Olvidó fichar en su franja horaria',
+      'Asistencia a consulta médica',
+      'Citaciones judiciales o renovación DNI',
+      'Fallecimiento de familiar, accidente o enfermedad grave',
+      'Gestión Externa (labores realizadas fuera del centro de trabajo)',
+      'Lactancia',
+      'Otros motivos solicitados',
+      'Falta de asistencia no justificada'
     ];
     const MOTIVO_NO_JUSTIFICADO_TEXTO = 'Falta de asistencia no justificada';
 
@@ -810,21 +980,59 @@
       return p[2] + '/' + p[1] + '/' + p[0];
     }
 
-    function rellenarSelectMotivos(idSelect) {
+    // Crea (si no existe ya) o actualiza, justo debajo de un <select> de
+    // motivo, una etiqueta que indica de un vistazo si lo elegido cuenta
+    // como RETRIBUIDO (cuenta como trabajado, no descuenta) o NO RETRIBUIDO
+    // (la única excepción: "Falta de asistencia no justificada") — para que
+    // el administrador no tenga que recordar la política de memoria.
+    function actualizarBadgeMotivo_(sel) {
+      if (!sel) return;
+      let badge = sel.nextElementSibling;
+      if (!badge || !badge.classList || !badge.classList.contains('badge-motivo')) {
+        badge = document.createElement('span');
+        badge.className = 'badge-motivo';
+        sel.insertAdjacentElement('afterend', badge);
+      }
+      const esNoRetribuido = sel.value === MOTIVO_NO_JUSTIFICADO_TEXTO;
+      badge.classList.toggle('retribuido', !esNoRetribuido);
+      badge.classList.toggle('no-retribuido', esNoRetribuido);
+      badge.textContent = esNoRetribuido ? 'No retribuido — descuenta del cómputo' : 'Retribuido — cuenta como trabajado';
+    }
+
+    // mostrarBadge: la etiqueta "Retribuido/No retribuido" es información
+    // de gestión interna (para que el administrador no tenga que recordar
+    // la política de memoria) — nunca debe verla el propio trabajador. Esta
+    // misma bandera decide también QUÉ LISTA de motivos se usa: cuando es
+    // false (selects de cara al trabajador: fichar fuera de horario,
+    // solicitar corrección de su propio registro) se usa el subconjunto
+    // MOTIVOS_CORRECCION_TRABAJADOR, en su orden fijo; cuando es true o se
+    // omite (selects de administración) se usa la lista completa
+    // MOTIVOS_CORRECCION, en orden alfabético.
+    function rellenarSelectMotivos(idSelect, mostrarBadge) {
       const sel = document.getElementById(idSelect);
       sel.innerHTML = '';
-      MOTIVOS_CORRECCION.forEach(function (m) {
+      const lista = (mostrarBadge === false) ? MOTIVOS_CORRECCION_TRABAJADOR : MOTIVOS_CORRECCION;
+      lista.forEach(function (m) {
         const opt = document.createElement('option');
         opt.value = m; opt.textContent = m;
         sel.appendChild(opt);
       });
+      if (mostrarBadge === false) {
+        const badgeExistente = sel.nextElementSibling;
+        if (badgeExistente && badgeExistente.classList && badgeExistente.classList.contains('badge-motivo')) badgeExistente.remove();
+        sel.onchange = null;
+        return;
+      }
+      sel.onchange = function () { actualizarBadgeMotivo_(sel); };
+      actualizarBadgeMotivo_(sel);
     }
 
     // Igual que rellenarSelectMotivos, pero para el desplegable de "Tipo"
     // de la pestaña Vacaciones/bajas/permisos: ahí NO tiene sentido
     // "Falta de asistencia no justificada" (eso no se planifica de
     // antemano en el calendario, se gestiona fichaje a fichaje desde
-    // Pendientes), así que se excluye de este desplegable en concreto.
+    // Pendientes), así que se excluye de este desplegable en concreto (por
+    // eso aquí la etiqueta siempre dirá "Retribuido": todo lo que queda es).
     function rellenarSelectTipoCalendarioPropio(idSelect) {
       const sel = document.getElementById(idSelect);
       sel.innerHTML = '';
@@ -834,6 +1042,8 @@
         opt.value = m; opt.textContent = m;
         sel.appendChild(opt);
       });
+      sel.onchange = function () { actualizarBadgeMotivo_(sel); };
+      actualizarBadgeMotivo_(sel);
     }
 
     // ---------- RELOJ DE CANARIAS ----------
@@ -1077,7 +1287,7 @@
           }
           if (res.justificacion) {
             pendienteJustificacion = { pin: pin, fichajeId: res.justificacion.fichajeId, fecha: res.justificacion.fecha, hora: res.justificacion.hora, tipoIncidencia: res.justificacion.tipoIncidencia };
-            rellenarSelectMotivos('motivo-no-justificada');
+            rellenarSelectMotivos('motivo-no-justificada', false);
             justif.classList.add('activa');
             // Es un paso obligatorio: no se reinicia el formulario hasta confirmar el motivo.
             // Límite de seguridad absoluto, por si algo impide confirmarlo con normalidad.
@@ -1420,7 +1630,7 @@
             '<button class="btn-enviar-correccion" onclick="confirmarMotivoRegistroPropio(' + idx + ')">Enviar</button>' +
             '<button class="btn-cancelar-correccion" onclick="cancelarSeleccionRegistroPropio()">Cancelar</button>' +
             '</div>';
-          rellenarSelectMotivos('motivo-registro-propio');
+          rellenarSelectMotivos('motivo-registro-propio', false);
         } else {
           fila.classList.remove('seleccionada');
           fila.classList.add('deshabilitada');
@@ -1504,6 +1714,8 @@
             return;
           }
           document.getElementById('admin-nombre-actual').textContent = res.nombre;
+          const inicialAdmin = String(res.nombre || 'A').trim().charAt(0).toUpperCase() || 'A';
+          document.getElementById('admin-avatar-iniciales').textContent = inicialAdmin;
           document.getElementById('admin-login').style.display = 'none';
           document.getElementById('admin-contenido').style.display = 'block';
           cambiarTabAdmin('pendientes'); // siempre empieza en "Pendientes", la pestaña que más falta hace revisar
@@ -1687,6 +1899,7 @@
             }
           })();
           aplicarPoliticaMotivoPendiente(idx);
+          activarEleccionHora_('botones-hora-pendiente-' + idx, 'hora-pendiente-' + idx);
         } else {
           item.classList.remove('seleccionada');
           item.classList.add('deshabilitada');
@@ -1718,14 +1931,68 @@
       return mejor;
     }
 
-    function usarHoraSugeridaPendiente(idx, hora) {
-      const campo = document.getElementById('hora-pendiente-' + idx);
-      if (campo) campo.value = hora;
+    // ---------- Comparación visual "horario asignado" vs "lo que fichó" ----------
+    // Se usa tanto en las tarjetas de Pendientes como en la búsqueda manual
+    // de un trabajador concreto, para que el administrador vea de un
+    // vistazo, antes de decidir, qué le tocaba ese día y qué fichó.
+    function fichadoTexto_(p) {
+      if (p.tipo === 'Ausencia') return 'No fichó (ausencia)';
+      return (p.hora !== '—' ? p.hora : '—') + (p.tipo ? ' · ' + p.tipo : '');
     }
-    function usarHoraRealPendiente(idx) {
-      const p = pendientesActuales[idx];
-      const campo = document.getElementById('hora-pendiente-' + idx);
-      if (campo) campo.value = (p.hora !== '—' ? p.hora : '');
+
+    function construirComparacionHorarioHtml_(p) {
+      const esAusencia = p.tipo === 'Ausencia';
+      let html = '<div class="comparacion-horario">' +
+        '<div class="caja-horario asignado"><div class="etiqueta-caja">Horario asignado ese día</div><div class="valor-caja">' +
+        (p.horarioTexto || 'Sin horario fijo asignado ese día') + '</div></div>';
+      if (!esAusencia) {
+        html += '<div class="caja-horario ' + (p.advertencia ? 'fichado' : 'fichado sin-aviso') + '">' +
+          '<div class="etiqueta-caja">Fichó</div><div class="valor-caja">' + fichadoTexto_(p) + '</div></div>';
+      }
+      html += '</div>';
+      if (p.motivoTrabajador) {
+        html += '<div class="fila-correccion">📝 Motivo indicado por el trabajador: ' + p.motivoTrabajador + '</div>';
+      }
+      return html;
+    }
+
+    // Botones de elección rápida de la hora correcta: o se CONFIRMA el
+    // horario que tenía asignado (lo habitual, no descuenta), o se MANTIENE
+    // la hora real que fichó, o el administrador ajusta la hora a mano en
+    // el campo de abajo — las tres vías escriben en el mismo campo <input
+    // type="time">, así que siempre se envía una sola hora correcta.
+    function construirEleccionHoraHtml_(p) {
+      const horaSugerida = obtenerHoraPrevistaSugerida(p);
+      const horaReal = (p.hora !== '—' ? p.hora : '');
+      let html = '<div class="eleccion-hora">';
+      if (horaSugerida) {
+        html += '<button type="button" class="btn-eleccion-hora" data-hora="' + horaSugerida + '" data-tipo="prevista">✓ Confirmar horario asignado (' + horaSugerida + ')</button>';
+      }
+      html += '<button type="button" class="btn-eleccion-hora" data-hora="' + horaReal + '" data-tipo="real">Mantener la hora que fichó' + (horaReal ? ' (' + horaReal + ')' : '') + '</button>';
+      html += '</div>';
+      return html;
+    }
+
+    function activarEleccionHora_(idContenedorBotones, idCampoHora) {
+      const cont = document.getElementById(idContenedorBotones);
+      const campo = document.getElementById(idCampoHora);
+      if (!cont || !campo) return;
+      cont.querySelectorAll('.btn-eleccion-hora').forEach(function (btn) {
+        btn.classList.toggle('elegida', btn.getAttribute('data-hora') === campo.value);
+        btn.addEventListener('click', function () {
+          campo.value = btn.getAttribute('data-hora');
+          sincronizarBotonesEleccionHora_(idContenedorBotones, idCampoHora);
+        });
+      });
+    }
+
+    function sincronizarBotonesEleccionHora_(idContenedorBotones, idCampoHora) {
+      const cont = document.getElementById(idContenedorBotones);
+      const campo = document.getElementById(idCampoHora);
+      if (!cont || !campo) return;
+      cont.querySelectorAll('.btn-eleccion-hora').forEach(function (b) {
+        b.classList.toggle('elegida', b.getAttribute('data-hora') === campo.value);
+      });
     }
 
     // Política de la organización: cualquier motivo de la lista cuenta como
@@ -1755,43 +2022,31 @@
         const horaSugerida = obtenerHoraPrevistaSugerida(p);
         campoHora.value = horaSugerida || (p.hora !== '—' ? p.hora : '');
       }
+      sincronizarBotonesEleccionHora_('botones-hora-pendiente-' + idx, 'hora-pendiente-' + idx);
     }
 
     function construirFormularioPendiente(p, idx) {
       let html = '';
       const esAusencia = p.tipo === 'Ausencia';
 
-      // 1) Qué fichó realmente el trabajador.
-      html += '<div class="fila-correccion" style="font-weight:600;">🕒 Fichaje registrado por el trabajador: ' +
-        p.fecha + (p.hora !== '—' ? ' · ' + p.hora : '') + (esAusencia ? '' : ' — ' + p.tipo) + '</div>';
+      // 1) Comparación visual: qué tenía ASIGNADO ese día vs qué FICHÓ
+      // realmente (y el motivo que el propio trabajador haya indicado, si
+      // lo hizo), para que el administrador decida con conocimiento.
+      html += construirComparacionHorarioHtml_(p);
 
-      // 2) Qué horario tenía previsto ese día (para poder decidir con conocimiento).
-      if (p.horarioTexto) {
-        html += '<div class="fila-correccion">📅 Horario previsto ese día: ' + p.horarioTexto + '</div>';
-      }
-
-      // 3) El motivo que el propio trabajador ha indicado, si lo indicó.
-      if (p.motivoTrabajador) {
-        html += '<div class="fila-correccion">📝 Motivo indicado por el trabajador: ' + p.motivoTrabajador + '</div>';
-      }
-
-      // 4) Formulario de resolución del administrador.
+      // 2) Formulario de resolución del administrador.
       html +=
         '<label class="etiqueta-campo">Motivo' + (esAusencia ? ' de la ausencia' : ' de la corrección') + '</label>' +
         '<select class="campo-texto" id="motivo-pendiente-' + idx + '"></select>';
       if (!esAusencia) {
-        const horaSugerida = obtenerHoraPrevistaSugerida(p);
         html +=
           '<label class="etiqueta-campo">Fecha correcta</label>' +
           '<input type="date" class="campo-texto" id="fecha-pendiente-' + idx + '" value="' + ddmmaaaaAIso(p.fecha) + '">' +
           '<label class="etiqueta-campo">Hora correcta</label>' +
           '<input type="time" class="campo-texto" id="hora-pendiente-' + idx + '" value="' + (p.hora !== '—' ? p.hora : '') + '">' +
-          '<div style="margin:6px 0 2px;">' +
-          (horaSugerida ? '<button type="button" class="link-corregir" style="margin-right:12px;" onclick="usarHoraSugeridaPendiente(' + idx + ',\'' + horaSugerida + '\')">Usar la hora prevista (' + horaSugerida + ') — no descuenta</button>' : '') +
-          '<button type="button" class="link-corregir" onclick="usarHoraRealPendiente(' + idx + ')">Mantener la hora real fichada' + (p.hora !== '—' ? ' (' + p.hora + ')' : '') + '</button>' +
-          '</div>' +
+          '<div id="botones-hora-pendiente-' + idx + '" class="eleccion-hora-wrap">' + construirEleccionHoraHtml_(p) + '</div>' +
           '<div class="ayuda-pin" style="margin-top:4px;margin-bottom:10px;">' +
-          'Por defecto: cualquier motivo de la lista cuenta como <b>justificado y trabajado</b> (se rellena la hora prevista, sin descuento), excepto <b>"Falta de asistencia no justificada"</b>, que mantiene la hora real fichada y sí se descuenta del cómputo del mes. Al cambiar el motivo, la hora se ajusta sola; si necesitas un caso distinto, puedes corregirla a mano o usar estos botones.' +
+          'Confirma el horario asignado (cuenta como justificado y trabajado, sin descuento), o mantén la hora real fichada, o ajústala a mano arriba. Al cambiar el motivo, la hora se ajusta sola salvo "Falta de asistencia no justificada", que mantiene la hora real y sí descuenta.' +
           '</div>';
       }
       html +=
@@ -1863,8 +2118,11 @@
             function abrirFormularioCorreccion() {
               filaCorreccionAdminActual = registro;
               rellenarSelectMotivos('correccion-admin-motivo');
+              document.getElementById('correccion-admin-info').innerHTML = construirComparacionHorarioHtml_(registro);
               document.getElementById('correccion-admin-fecha').value = ddmmaaaaAIso((registro.oficial && registro.oficial.fecha) || registro.fecha);
               document.getElementById('correccion-admin-hora').value = ((registro.oficial && registro.oficial.hora) || registro.hora).slice(0, 5);
+              document.getElementById('correccion-admin-botones-hora').innerHTML = construirEleccionHoraHtml_(registro);
+              activarEleccionHora_('correccion-admin-botones-hora', 'correccion-admin-hora');
               document.getElementById('form-correccion-admin').classList.add('activo');
             }
             if (registro.advertencia) {
@@ -2568,7 +2826,7 @@
     rellenarSelectoresMesAnio('select-mes', 'select-anio');
     rellenarSelectoresMesAnio('select-mes-admin', 'select-anio-admin');
     rellenarSelectoresMesAnio('inf-mes', 'inf-anio');
-    rellenarSelectMotivos('motivo-no-justificada');
+    rellenarSelectMotivos('motivo-no-justificada', false);
     rellenarSelectMotivos('correccion-admin-motivo');
     rellenarSelectTipoCalendarioPropio('calb-tipo');
   </script>
