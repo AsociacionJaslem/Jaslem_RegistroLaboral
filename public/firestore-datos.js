@@ -11,17 +11,17 @@ import {
 } from 'https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js';
 import {
   signInWithEmailAndPassword, signOut, onAuthStateChanged,
-  sendSignInLinkToEmail, isSignInWithEmailLink, signInWithEmailLink,
+  isSignInWithEmailLink, signInWithEmailLink, sendSignInLinkToEmail,
   sendPasswordResetEmail, confirmPasswordReset, updatePassword
 } from 'https://www.gstatic.com/firebasejs/10.13.0/firebase-auth.js';
 
 import {
   soloDigitos, normalizarDia, formatearFecha, formatearHoraCompleta, formatearHoraCorta,
-  obtenerDiaSemana, evaluarPuntualidad, obtenerTramosValidos, MOTIVOS_CORRECCION, MOTIVO_NO_JUSTIFICADO, nombreMes, TOLERANCIA_MIN,
+  obtenerDiaSemana, evaluarPuntualidad, obtenerTramosValidos, MOTIVOS_CORRECCION, MOTIVOS_CORRECCION_TRABAJADOR, MOTIVO_NO_JUSTIFICADO, nombreMes, TOLERANCIA_MIN,
   calcularHashCodigo, codigoValido, calcularHuellaTexto, combinarFechaYHoraCanarias
 } from './logica-comun.js';
 
-export { MOTIVOS_CORRECCION, MOTIVO_NO_JUSTIFICADO };
+export { MOTIVOS_CORRECCION, MOTIVOS_CORRECCION_TRABAJADOR, MOTIVO_NO_JUSTIFICADO };
 
 // Perfiles de modalidad de trabajo válidos. "presencial" es el valor por
 // defecto para no romper a los trabajadores dados de alta antes de que
@@ -241,7 +241,10 @@ function calcularEstadoRegistro(fichaje, cadenaCorrecciones) {
 export async function solicitarCorreccionTrabajador(db, codigo, fichajeId, motivo) {
   const trabajador = await buscarTrabajadorPorCodigo(db, codigo);
   if (!trabajador) return { ok: false, mensaje: 'Código no reconocido.' };
-  if (MOTIVOS_CORRECCION.indexOf(motivo) === -1) return { ok: false, mensaje: 'Selecciona un motivo de la lista.' };
+  // El trabajador solo puede elegir de su subconjunto (MOTIVOS_CORRECCION_TRABAJADOR),
+  // nunca de la lista completa de administración — se valida aquí también,
+  // no solo en la interfaz, para que no se pueda forzar un motivo fuera de esa lista.
+  if (MOTIVOS_CORRECCION_TRABAJADOR.indexOf(motivo) === -1) return { ok: false, mensaje: 'Selecciona un motivo de la lista.' };
   if (!fichajeId) return { ok: false, mensaje: 'No se pudo identificar el registro a corregir.' };
 
   const fichajeSnap = await getDoc(doc(db, 'trabajadores', trabajador.dni, 'fichajes', fichajeId));
@@ -300,6 +303,33 @@ function construirRegistrosConCadenas(fichajesDocs, correccionesDocs) {
   return { registros: registros, correccionesTodas: correccionesTodas };
 }
 
+// Horario previsto (semanal) de UN trabajador, cacheado por si se consulta
+// varias veces en la misma llamada — para poder mostrarle siempre al
+// administrador qué tocaba ese día concreto al lado del fichaje real, aquí
+// y también en la lista de pendientes (obtenerRegistrosPendientes).
+const _horarioSemanalCache = {};
+async function obtenerHorarioSemanalDe_(db, dni) {
+  if (_horarioSemanalCache[dni] !== undefined) return _horarioSemanalCache[dni];
+  const hSnap = await getDoc(doc(db, 'horarios', dni));
+  _horarioSemanalCache[dni] = hSnap.exists() ? hSnap.data() : {};
+  return _horarioSemanalCache[dni];
+}
+function diaSemanaDeFechaStr_(fechaStr) {
+  const p = String(fechaStr).split('/').map(Number);
+  const d = new Date(p[2] || 1970, (p[1] || 1) - 1, p[0] || 1);
+  return ['Domingo', 'Lunes', 'Martes', 'Miercoles', 'Jueves', 'Viernes', 'Sabado'][d.getDay()];
+}
+function tramosDelDia_(horarioSemanal, fechaStr) {
+  const diaSemana = diaSemanaDeFechaStr_(fechaStr);
+  const claveDia = Object.keys(horarioSemanal || {}).find(function (d) { return normalizarDia(d) === normalizarDia(diaSemana); });
+  return obtenerTramosValidos(claveDia ? horarioSemanal[claveDia] : null);
+}
+function horarioTextoDelDia_(horarioSemanal, fechaStr) {
+  const tramos = tramosDelDia_(horarioSemanal, fechaStr);
+  if (tramos.length === 0) return 'Sin horario fijo asignado ese día';
+  return tramos.map(function (t) { return t.entrada + '–' + t.salida; }).join(' y ');
+}
+
 async function obtenerRegistrosPorDni(db, dni, mes, anio) {
   const [fichajesSnap, incidenciasSnap, correccionesSnap] = await Promise.all([
     getDocs(collection(db, 'trabajadores', dni, 'fichajes')),
@@ -308,9 +338,16 @@ async function obtenerRegistrosPorDni(db, dni, mes, anio) {
   ]);
 
   const construido = construirRegistrosConCadenas(fichajesSnap.docs, correccionesSnap.docs);
+  const horarioSemanal = await obtenerHorarioSemanalDe_(db, dni);
 
   const registros = construido.registros
     .filter(function (f) { return partesFechaValidas(f.fecha, mes, anio); })
+    .map(function (f) {
+      return Object.assign({}, f, {
+        horarioTexto: horarioTextoDelDia_(horarioSemanal, f.fecha),
+        horarioTramos: tramosDelDia_(horarioSemanal, f.fecha)
+      });
+    })
     .sort(function (a, b) { return (a.fecha + a.hora).localeCompare(b.fecha + b.hora); });
 
   const incidencias = incidenciasSnap.docs
@@ -447,43 +484,83 @@ async function sincronizarCuentaYCodigo(auth, db, dni, codigoNuevo, email) {
   return { ok: true, mensaje: diagnostico };
 }
 
-// El enlace del correo (invitación o "he olvidado mi código") apunta a
-// "crear-codigo.html", una página aparte y mínima que SOLO sirve para
-// elegir el código de 6 dígitos — nunca a index.html (la aplicación de
-// fichar/Mis registros/Administración), que está pensada para la tablet
-// de la oficina, no para el móvil del trabajador.
-function enlaceInvitacion() {
-  const url = new URL('./crear-codigo.html', window.location.href);
-  url.search = ''; url.hash = '';
-  return { url: url.toString(), handleCodeInApp: true };
-}
-
-// Enlace para "he olvidado mi código". Usa el MISMO mecanismo que la
-// invitación (signInWithEmailLink), no el de "restablecer contraseña" de
-// Firebase: ese segundo tipo de correo SIEMPRE abre primero una pantalla
-// genérica de Firebase (fuera de nuestro control, en inglés salvo que el
-// proyecto la tenga traducida, y que no sabe nada de nuestro código de 6
-// dígitos) antes de redirigir — en la práctica, nunca llega a nuestra
-// página con el código intacto. El enlace de "signIn" sí va siempre
-// directo a nuestra página, así que reutilizamos ese mismo camino, que es
-// exactamente igual de seguro (la comprobación real está en
-// sincronizarCuentaYCodigo, idéntica para ambos casos).
+// El enlace de "he olvidado mi código" apunta a "crear-codigo.html", una
+// página aparte y mínima que SOLO sirve para elegir el código de 6 dígitos
+// — nunca a index.html (la aplicación de fichar/Mis registros/
+// Administración), que está pensada para la tablet de la oficina, no para
+// el móvil del trabajador.
+//
+// Usa el enlace de tipo "signIn" (signInWithEmailLink), no el de
+// "restablecer contraseña" de Firebase: ese segundo tipo de correo SIEMPRE
+// abre primero una pantalla genérica de Firebase (fuera de nuestro
+// control, en inglés salvo que el proyecto la tenga traducida, y que no
+// sabe nada de nuestro código de 6 dígitos) antes de redirigir — en la
+// práctica, nunca llega a nuestra página con el código intacto. El enlace
+// de "signIn" sí va siempre directo a nuestra página, así que reutilizamos
+// ese mismo camino, que es exactamente igual de seguro (la comprobación
+// real está en sincronizarCuentaYCodigo).
+//
+// Este correo lo manda directamente Firebase (límite del plan gratuito:
+// 5 al día) — ver enviarInvitacionTrabajador más abajo para la invitación,
+// que no tiene ese límite porque no usa este mecanismo.
 function enlaceRecuperacion() {
   const url = new URL('./crear-codigo.html', window.location.href);
   url.search = '?origen=recuperacion'; url.hash = '';
   return { url: url.toString(), handleCodeInApp: true };
 }
 
-// La manda el ADMINISTRADOR, cuando él quiere — nunca en automático.
+// "He olvidado mi código" — lo pide el propio trabajador. Al ser algo
+// puntual y poco frecuente (no se da de alta a varias personas de golpe,
+// como sí pasa con las invitaciones), se deja en el límite de Firebase de
+// 5 correos al día del plan gratuito — simple y sin nada más que montar.
+export async function solicitarRecuperarCodigo(auth, email) {
+  try {
+    await sendSignInLinkToEmail(auth, email, enlaceRecuperacion());
+    window.localStorage.setItem('jaslem_email_invitacion', email);
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, mensaje: 'No se pudo enviar el correo de recuperación. Inténtalo de nuevo en unos minutos (o espera a mañana si ya se han pedido varias recuperaciones hoy).' };
+  }
+}
+
+// URL de la implementación ("Web App") del servicio aparte "JÁSLEM —
+// Invitaciones" (Google Apps Script). Crea la cuenta del trabajador y le
+// manda el enlace por Gmail (varios cientos al día), en vez de pasar por
+// el límite de Firebase de 5 correos de acceso al día del plan gratuito —
+// imprescindible para poder invitar a varios trabajadores el mismo día.
+// No necesita ninguna cuenta de Google Cloud ni credenciales especiales:
+// solo Firebase, GitHub y el editor de Apps Script (ver README_ACCESOS.md).
+// Se rellena una sola vez, al desplegar ese servicio.
+const URL_SERVICIO_ACCESOS = 'https://script.google.com/macros/s/AKfycbw_oOEpn8NMj3NF_Df_6aUgIqMwaxxpccdQMUTF4km8Ck5nlgTcUcG_DsHorZlbnWOD/exec';
+
+// La manda el ADMINISTRADOR, cuando él quiere — nunca en automático. El
+// propio servicio de Apps Script crea la cuenta del trabajador y le envía
+// un enlace (a una página suya, no a crear-codigo.html) donde elige su
+// código de 6 dígitos; esta función solo le pide que lo haga.
 export async function enviarInvitacionTrabajador(auth, db, dni) {
   if (!auth.currentUser) return { ok: false, mensaje: 'Tu sesión ha caducado. Vuelve a identificarte.' };
+  if (!URL_SERVICIO_ACCESOS || URL_SERVICIO_ACCESOS.indexOf('PEGA_AQUI') !== -1) {
+    return { ok: false, mensaje: 'Falta configurar la URL del servicio de invitaciones (ver README_ACCESOS.md).' };
+  }
   const privSnap = await getDoc(doc(db, 'trabajadores_privado', dni));
   if (!privSnap.exists() || !privSnap.data().email) return { ok: false, mensaje: 'Este trabajador no tiene un email guardado.' };
   const email = privSnap.data().email;
-  auth.languageCode = 'es'; // El correo que envía Firebase debe salir en español
-  await sendSignInLinkToEmail(auth, email, enlaceInvitacion());
-  window.localStorage.setItem('jaslem_email_invitacion', email);
-  return { ok: true, email: email };
+  try {
+    const resp = await fetch(URL_SERVICIO_ACCESOS, {
+      method: 'POST',
+      // "text/plain" a propósito (no "application/json"): así el navegador
+      // no manda una petición de comprobación previa (CORS preflight) que
+      // Apps Script no sabe responder; el propio servicio igualmente lee el
+      // cuerpo como JSON.
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({ accion: 'invitacion', email: email, dni: dni })
+    });
+    const json = await resp.json();
+    if (!json.ok) return { ok: false, mensaje: json.mensaje || 'No se pudo enviar la invitación.' };
+    return { ok: true, email: email };
+  } catch (e) {
+    return { ok: false, mensaje: 'No se pudo contactar con el servicio de invitaciones. Comprueba tu conexión.' };
+  }
 }
 
 // ¿La página se ha abierto desde un enlace de invitación o de recuperación?
@@ -505,23 +582,6 @@ export async function aceptarInvitacion(auth, db, email, dni, codigoNuevo) {
   if (!resultado.ok) { await signOut(auth); return resultado; }
   await signOut(auth); // el kiosk no debe quedarse con nadie con la sesión abierta
   return { ok: true, mensajeDiagnostico: resultado.mensaje || '' };
-}
-
-// "He olvidado mi código" — lo pide el propio trabajador, sin que el
-// administrador tenga que hacer nada. Usa el enlace de tipo "invitación"
-// (ver enlaceRecuperacion arriba) para que vaya directo a crear-codigo.html.
-export async function solicitarRecuperarCodigo(auth, email) {
-  try {
-    auth.languageCode = 'es'; // El correo que envía Firebase debe salir en español
-    await sendSignInLinkToEmail(auth, email, enlaceRecuperacion());
-    window.localStorage.setItem('jaslem_email_invitacion', email);
-    return { ok: true };
-  } catch (e) {
-    // Diagnóstico temporal: se muestra el código real del error (p.ej.
-    // "auth/missing-email", "auth/invalid-email", "auth/unauthorized-continue-uri")
-    // en vez de ocultarlo, mientras se depura este fallo nuevo.
-    return { ok: false, mensaje: 'No se pudo enviar el correo. Comprueba el email. [' + (e.code || e.message) + ']' };
-  }
 }
 
 // Paso 2 de "he olvidado mi código": llega desde el enlace del correo, con
@@ -653,29 +713,10 @@ export async function obtenerRegistrosPendientes(db) {
   }
 
   // Horario previsto (semanal) de cada trabajador, para poder mostrarle al
-  // administrador qué tocaba ese día concreto al lado del fichaje real.
-  const horarioCache = {};
-  async function obtenerHorarioSemanal(dni) {
-    if (horarioCache[dni] !== undefined) return horarioCache[dni];
-    const hSnap = await getDoc(doc(db, 'horarios', dni));
-    horarioCache[dni] = hSnap.exists() ? hSnap.data() : {};
-    return horarioCache[dni];
-  }
-  function diaSemanaDeFechaStr_(fechaStr) {
-    const p = String(fechaStr).split('/').map(Number);
-    const d = new Date(p[2] || 1970, (p[1] || 1) - 1, p[0] || 1);
-    return ['Domingo', 'Lunes', 'Martes', 'Miercoles', 'Jueves', 'Viernes', 'Sabado'][d.getDay()];
-  }
-  function tramosDelDia_(horarioSemanal, fechaStr) {
-    const diaSemana = diaSemanaDeFechaStr_(fechaStr);
-    const claveDia = Object.keys(horarioSemanal || {}).find(function (d) { return normalizarDia(d) === normalizarDia(diaSemana); });
-    return obtenerTramosValidos(claveDia ? horarioSemanal[claveDia] : null);
-  }
-  function horarioTextoDelDia_(horarioSemanal, fechaStr) {
-    const tramos = tramosDelDia_(horarioSemanal, fechaStr);
-    if (tramos.length === 0) return 'Sin horario fijo asignado ese día';
-    return tramos.map(function (t) { return t.entrada + '–' + t.salida; }).join(' y ');
-  }
+  // administrador qué tocaba ese día concreto al lado del fichaje real
+  // (obtenerHorarioSemanalDe_/tramosDelDia_/horarioTextoDelDia_ son de
+  // ámbito de módulo, se comparten con obtenerRegistrosPorDni).
+  function obtenerHorarioSemanal(dni) { return obtenerHorarioSemanalDe_(db, dni); }
 
   const pendientes = [];
   const clavesYaAnadidas = {};
